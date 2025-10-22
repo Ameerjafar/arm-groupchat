@@ -21,22 +21,34 @@ const ConnectWallet = () => {
       console.log("this one is the params", params);
       console.log("telegramId", params.get("telegramId"));
       console.log("username", params.get("username"));
-      const telegramId = params.get("telegramId");
-      const username = params.get("username");
-
-
+      let telegramId = params.get("telegramId");
+      let username = params.get("username");
+      const min = 1000;
+      const max = 9999;
+      const randomInt = Math.floor(
+        Math.random() * (max - min + 1) + min
+      ).toString();
+      telegramId = randomInt;
+      username = randomInt;
+      console.log("this one is the params", params);
+      console.log("telegramId", params.get("telegramId"));
+      console.log("username", params.get("username"));
+      console.log(randomInt);
       try {
         console.log("hello bro");
-        const response = await axios.post(`http://localhost:5000/connectWallet`, {
-          walletAddress: pubKeyString,
-          telegramId,
-          username,
-        });
+        const response = await axios.post(
+          `http://localhost:5000/connectWallet`,
+          {
+            walletAddress: randomInt,
+            telegramId,
+            username,
+          }
+        );
 
         /// errror from here
-        const botUsername = "@ameerjafarBot"; // replace with your bot username
+        const botUsername = "ameerjafarBot"; // replace with your bot username
         const data = encodeURIComponent(pubKeyString);
-        window.location.href = `https://t.me/${botUsername}?start=${data}`;
+        window.location.href = `https://t.me/${botUsername}`;
         console.log(response);
       } catch (err) {
         console.error("Failed to send wallet to backend:", err);
