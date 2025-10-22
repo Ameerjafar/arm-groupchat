@@ -32,6 +32,11 @@ const ConnectWallet = () => {
           telegramId,
           username,
         });
+
+        /// errror from here
+        const botUsername = "@ameerjafarBot"; // replace with your bot username
+        const data = encodeURIComponent(pubKeyString);
+        window.location.href = `https://t.me/${botUsername}?start=${data}`;
         console.log(response);
       } catch (err) {
         console.error("Failed to send wallet to backend:", err);

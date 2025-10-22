@@ -1,9 +1,9 @@
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
-import cors from 'cors';
+import cors from "cors";
 const app = express();
 app.use(express.json());
-app.use(cors())
+app.use(cors());
 const prisma = new PrismaClient();
 
 app.post("/connectWallet", async (req: Request, res: Response) => {
