@@ -1,19 +1,20 @@
 import express, { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import cors from "cors";
+import { validateSolanaAddress } from "./services/utlis";
 const app = express();
 app.use(express.json());
 app.use(cors());
 const prisma = new PrismaClient();
 
-app.post("/connectWallet", async (req: Request, res: Response) => {
+app.post("/createuser", async (req: Request, res: Response) => {
   console.log("inside the connect wallet");
   const { telegramId, username, walletAddress } = req.body;
 
-  if (!telegramId || !walletAddress) {
+  if (!telegramId || !username) {
     return res
       .status(400)
-      .json({ message: "telegramId and walletAddress are required" });
+      .json({ message: "telegramId and username  are required" });
   }
 
   try {
@@ -25,6 +26,10 @@ app.post("/connectWallet", async (req: Request, res: Response) => {
     if (existingUser) {
       return res.status(409).json({ message: "user already exists" });
     }
+    if (!validateSolanaAddress(walletAddress).isValidFormat) {
+       console.log("invalid backend check");
+      return res.status(400).json({ message: "invalid public key format" });
+    }
     const user = await prisma.user.create({
       data: {
         telegramId,
@@ -34,7 +39,7 @@ app.post("/connectWallet", async (req: Request, res: Response) => {
     });
 
     return res.status(200).json({
-      message: "User saved and wallet connected successfully",
+      message: "User saved connected successfully",
       user,
     });
   } catch (error) {
