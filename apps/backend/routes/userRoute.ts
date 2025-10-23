@@ -1,8 +1,11 @@
-import express, { Request, Response } from "express";
+import express, { Request, response, Response } from "express";
 import { prisma } from "@repo/db";
 import { validateSolanaAddress } from "../services/utlis";
+import { Connection, clusterApiUrl, PublicKey } from "@solana/web3.js";
 
 export const userRoute = express.Router();
+
+const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
 userRoute.post("/connectwallet", async (req: Request, res: Response) => {
   const { telegramId, username, walletAddress, groupId } = req.body;
@@ -68,7 +71,7 @@ userRoute.post("/createuser", async (req: Request, res: Response) => {
     if (existingUser) {
       return res.status(409).json({ message: "User already exists" });
     }
-    console.log("outside the existing user")
+    console.log("outside the existing user");
     const newUser = await prisma.user.create({
       data: {
         telegramId,
@@ -76,7 +79,7 @@ userRoute.post("/createuser", async (req: Request, res: Response) => {
         groupId,
       },
     });
-    
+
     return res
       .status(200)
       .json({ message: "User created successfully", user: newUser });
@@ -103,3 +106,33 @@ userRoute.get(
     }
   }
 );
+
+userRoute.post("/userBalance", async (req: Request, res: Response) => {
+  const { telegramId } = req.body;
+  try {
+    if (!telegramId) {
+      return res.status(409).json({ message: "telegramId does not exist" });
+    }
+    const existingUser = await prisma.user.findUnique({
+      where: {
+        telegramId,
+      },
+    });
+    console.log("response from the backend", response);
+    if (!existingUser) {
+      return res.status(409).json({ message: "user not found in db" });
+    }
+    const walletAddress = existingUser.walletAddress;
+    if (!walletAddress) {
+      return res
+        .status(400)
+        .json({ message: "we cannot find your wallet address" });
+    }
+    const userBalance = await connection.getBalance(
+      new PublicKey(walletAddress)
+    );
+    return res.status(200).json({ userBalance });
+  } catch (error: unknown) {
+    return res.status(400).json({ message: error });
+  }
+});

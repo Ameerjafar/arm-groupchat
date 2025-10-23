@@ -21,13 +21,12 @@ bot.start(async (ctx) => {
   await ctx.reply("🤖 Welcome! I can help you connect your Solana wallet.");
 });
 
-
 bot.command("connectwallet", async (ctx) => {
   try {
     ctx.session ??= {};
     console.log("session", ctx.session);
     ctx.session.waitingForWallet = true;
-    console.log(ctx.session)
+    console.log(ctx.session);
     await ctx.reply("💬 Please enter your Solana wallet public address:");
     console.log("Waiting for wallet input...");
   } catch (err) {
@@ -37,11 +36,11 @@ bot.command("connectwallet", async (ctx) => {
 });
 
 bot.on("text", async (ctx) => {
-  console.log('hello bro');
-  console.log("text is calling")
+  console.log("hello bro");
+  console.log("text is calling");
   if (!ctx.session?.waitingForWallet) {
     return;
-  };
+  }
   console.log("inside the text thing");
   const walletAddress = ctx.message.text.trim();
   const telegramId = ctx.from.id.toString();
@@ -55,12 +54,15 @@ bot.on("text", async (ctx) => {
 
   try {
     console.log(process.env.BACKEND_URL!);
-    const res = await axios.post(`${process.env.BACKEND_URL}/user/connectwallet`, {
-      telegramId,
-      username,
-      walletAddress,
-      groupId,
-    });
+    const res = await axios.post(
+      `${process.env.BACKEND_URL}/user/connectwallet`,
+      {
+        telegramId,
+        username,
+        walletAddress,
+        groupId,
+      }
+    );
     if (res.data.message === "updated the wallet address") {
       await ctx.reply("wallet updated successfully");
     } else {
@@ -81,31 +83,40 @@ bot.on("text", async (ctx) => {
       await ctx.reply("⚠️ Could not connect to backend. Try again later.");
     }
   }
-})
+});
 bot.on("new_chat_members", async (ctx) => {
   const newMembers = ctx.message.new_chat_members;
   const groupId = ctx.chat.id.toString();
   for (const member of newMembers) {
     const botCheck = member.is_bot;
-    if(botCheck) {
-      await ctx.reply("Thank you for added me in the group, Please make me admin to function properly. ✅");
+    if (botCheck) {
+      await ctx.reply(
+        "Thank you for added me in the group, Please make me admin to function properly. ✅"
+      );
       continue;
-    };
+    }
     const telegramId = member.id.toString();
     const username = member.username || member.first_name || "Unknown";
-    console.log(`👋 New member joined: ${username} (${telegramId}) in group ${groupId}`);
+    console.log(
+      `👋 New member joined: ${username} (${telegramId}) in group ${groupId}`
+    );
 
     await ctx.reply(`🎉 Welcome, ${username}!`);
 
     try {
-      console.log('create the user calling');
-      const createUserRes = await axios.post(`${process.env.BACKEND_URL}/user/createuser`, {
-        telegramId,
-        username,
-        groupId,
-      });
+      console.log("create the user calling");
+      const createUserRes = await axios.post(
+        `${process.env.BACKEND_URL}/user/createuser`,
+        {
+          telegramId,
+          username,
+          groupId,
+        }
+      );
 
-      console.log(`✅ User created: ${createUserRes.data.message || "Success"}`);
+      console.log(
+        `✅ User created: ${createUserRes.data.message || "Success"}`
+      );
     } catch (error: any) {
       if (error.response?.status === 409) {
         console.log("409 error message");
@@ -117,13 +128,20 @@ bot.on("new_chat_members", async (ctx) => {
     }
 
     try {
-      const addMemberRes = await axios.post(`${process.env.BACKEND_URL}/group/addMember`, {
-        telegramId,
-        groupId,
-      });
+      const addMemberRes = await axios.post(
+        `${process.env.BACKEND_URL}/group/addMember`,
+        {
+          telegramId,
+          groupId,
+        }
+      );
 
-      console.log(`✅ Added ${username} to group: ${addMemberRes.data.message}`);
-      await ctx.reply(`✅ ${username} has been added to the group successfully!`);
+      console.log(
+        `✅ Added ${username} to group: ${addMemberRes.data.message}`
+      );
+      await ctx.reply(
+        `✅ ${username} has been added to the group successfully!`
+      );
     } catch (error: any) {
       if (error.response) {
         const { status, data } = error.response;
@@ -146,14 +164,15 @@ bot.on("new_chat_members", async (ctx) => {
   }
 });
 
-
 bot.on("left_chat_member", async (ctx) => {
   const leftMember = ctx.message.left_chat_member;
   const telegramId = leftMember.id.toString();
   const username = leftMember.username || leftMember.first_name || "Unknown";
   const groupId = ctx.chat.id.toString();
 
-  console.log(`👋 Member left: ${username} (${telegramId}) from group ${groupId}`);
+  console.log(
+    `👋 Member left: ${username} (${telegramId}) from group ${groupId}`
+  );
   try {
     await axios.post(`${process.env.BACKEND_URL}/group/removeMember`, {
       telegramId,
@@ -164,7 +183,6 @@ bot.on("left_chat_member", async (ctx) => {
     console.error(`❌ Failed to remove ${username}:`, error.message);
   }
 });
-
 
 bot.command("balance", async (ctx) => {
   const args = ctx.message.text.split(" ");
@@ -180,17 +198,20 @@ bot.command("balance", async (ctx) => {
   }
 });
 
-
 bot.on("my_chat_member", async (ctx: any) => {
   const newStatus = ctx.myChatMember.new_chat_member.status;
   const oldStatus = ctx.myChatMember.old_chat_member.status;
   const chatId = ctx.chat.id.toString();
   const chatName = ctx.chat?.title || "Unknown Group";
 
-  if ((oldStatus === "left" || oldStatus === "kicked") && 
-      (newStatus === "member" || newStatus === "administrator")) {
+  if (
+    (oldStatus === "left" || oldStatus === "kicked") &&
+    (newStatus === "member" || newStatus === "administrator")
+  ) {
     console.log(`🚀 Bot added to group: ${chatName} (${chatId})`);
-    ctx.reply("Thank you for added me in the group, please make me as the admin to function properly ✅")
+    ctx.reply(
+      "Thank you for added me in the group, please make me as the admin to function properly ✅"
+    );
     try {
       console.log("create group is calling");
       await axios.post(`${process.env.BACKEND_URL}/group/creategroup`, {
@@ -198,10 +219,30 @@ bot.on("my_chat_member", async (ctx: any) => {
         name: chatName,
       });
       console.log("✅ Group created in DB");
-      await ctx.reply("/help command will help you to find my all commands")
+      await ctx.reply("/help command will help you to find my all commands");
     } catch (error: any) {
       console.error("❌ Error creating group in DB:", error.message);
     }
+  }
+});
+
+bot.command("mybalance", async (ctx) => {
+  console.log("inside the my balance");
+  await ctx.reply("quering from blockchain");
+  const telegramId = ctx.from.id;
+  try {
+    const response = await axios.post(
+      `${process.env.BACKEND_URL}/user/userBalance`,
+      {
+        telegramId,
+      }
+    );
+    const userBalance = response.data.userBalane;
+    console.log("backend response", response.data);
+    ctx.reply("your Balance", userBalance);
+  } catch (error: any) {
+    const errMessage = error?.response?.data.message;
+    console.log(errMessage);
   }
 });
 
