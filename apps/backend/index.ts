@@ -26,8 +26,8 @@ app.post("/createuser", async (req: Request, res: Response) => {
     if (existingUser) {
       return res.status(409).json({ message: "user already exists" });
     }
+    
     if (!validateSolanaAddress(walletAddress).isValidFormat) {
-       console.log("invalid backend check");
       return res.status(400).json({ message: "invalid public key format" });
     }
     const user = await prisma.user.create({

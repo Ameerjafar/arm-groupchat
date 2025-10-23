@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey,Connection, clusterApiUrl  } from "@solana/web3.js";
 
 export const validateSolanaAddress = (addressString: any) => {
   try {
@@ -10,3 +10,6 @@ export const validateSolanaAddress = (addressString: any) => {
     return { isValidFormat: false, isOnCurve: false, publicKey: null };
   }
 };
+
+
+

@@ -7,6 +7,7 @@ dotenv.config();
 
 interface MySession {
   waitingForWallet?: boolean;
+  walletAddress? : string;
 }
 
 interface MyContext extends Context {
@@ -17,12 +18,18 @@ bot.use(session());
 
 const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
-// 🧩 5️⃣ Commands
 bot.start(async (ctx) => {
-  await ctx.reply("🤖 Welcome! I can help you connect your Solana wallet.");
+  await ctx.reply(
+    "🤖 Welcome! I can help you connect your Solana wallet.\n\n" +
+    "💡 Here are the available commands:\n" +
+    "/connectwallet - Link your wallet\n" +
+    "/enterAddressManually - Enter your wallet address manually\n" +
+    "/balance - Check SOL balance\n" +
+    "/help - Show available commands"
+  );
 });
 
-bot.command("connectwallet", async (ctx) => {
+bot.command("enterAddressManually", async (ctx) => {
   try {
     ctx.session ??= {}; // 
 
@@ -39,7 +46,7 @@ bot.on("text", async (ctx) => {
   if (!ctx.session?.waitingForWallet) return;
 
   const walletAddress = ctx.message.text.trim();
-  const telegramId = "sldkaflsad";
+  const telegramId = "sldkafdfdkd;lfkflsad";
   const username = ctx.from.username || "unknown";
 
   ctx.session.waitingForWallet = false;
@@ -54,6 +61,7 @@ bot.on("text", async (ctx) => {
       username,
       walletAddress,
     });
+    ctx.session.walletAddress = walletAddress;
 
     await ctx.reply(
       `✅ Wallet linked successfully!\n\n🔗 Address: ${walletAddress}`
@@ -74,10 +82,19 @@ bot.command("balance", async (ctx) => {
   const args = ctx.message.text.split(" ");
   const address = args[1];
 
-  if (!address) return ctx.reply("⚠️ Usage: /balance <wallet_address>");
+  // Check if the user has already connected their wallet
+  if (!address && !ctx.session?.walletAddress) {
+    return ctx.reply(
+      "⚠️ No wallet address provided or connected.\n" +
+      "Please connect your wallet first using /connectwallet or provide an address directly: /balance <wallet_address>"
+    );
+  }
+
+  // Use the connected wallet address if no address is provided
+  const walletAddress = address || ctx.session.walletAddress;
 
   try {
-    const balance = await connection.getBalance(new PublicKey(address));
+    const balance = await connection.getBalance(new PublicKey(walletAddress ?? ''));
     ctx.reply(`💸 Balance: ${(balance / 1e9).toFixed(4)} SOL`);
   } catch (err) {
     ctx.reply("❌ Invalid wallet address");
