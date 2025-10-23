@@ -35,9 +35,47 @@ bot.command("connectwallet", async (ctx) => {
   }
 });
 
+bot.command("balance", async (ctx) => {
+  console.log('inside balance');
+  
+  const args = ctx.message.text.split(" ");
+  const address = args[1];
+
+  if (!address) return ctx.reply("⚠️ Usage: /balance <wallet_address>");
+
+  try {
+    const balance = await connection.getBalance(new PublicKey(address));
+    ctx.reply(`💸 Balance: ${(balance / 1e9).toFixed(4)} SOL`);
+  } catch (err) {
+    ctx.reply("❌ Invalid wallet address");
+  }
+});
+
+bot.command("mybalance", async (ctx) => {
+  console.log("inside the mybalance");
+  await ctx.reply("🔎 Querying your balance from the blockchain...");
+
+  const telegramId = ctx.from.id.toString();
+
+  try {
+    const response = await axios.post(
+      `${process.env.BACKEND_URL}/user/userBalance`,
+      { telegramId }
+    );
+
+    const userBalance = response.data.userBalance; // note: typo fix (userBalane -> userBalance)
+    console.log("backend response", response.data);
+    const solBalance = (userBalance / 1e9).toFixed(4);
+    await ctx.reply(`💰 Your balance: ${solBalance} SOL`);
+  } catch (error: any) {
+    const errMessage = error?.response?.data?.message || error.message;
+    console.error("❌ Error fetching balance:", errMessage);
+    await ctx.reply("⚠️ Could not fetch your balance. Try again later.");
+  }
+});
+
+
 bot.on("text", async (ctx) => {
-  console.log("hello bro");
-  console.log("text is calling");
   if (!ctx.session?.waitingForWallet) {
     return;
   }
@@ -79,7 +117,7 @@ bot.on("text", async (ctx) => {
     } else if (errorMessage === "user already exists") {
       await ctx.reply("You are already connected with your wallet");
     } else {
-      console.error("❌ Backend error:", err.response.data.message);
+      console.error("❌ Backend error:", err?.response?.data?.message);
       await ctx.reply("⚠️ Could not connect to backend. Try again later.");
     }
   }
@@ -184,19 +222,7 @@ bot.on("left_chat_member", async (ctx) => {
   }
 });
 
-bot.command("balance", async (ctx) => {
-  const args = ctx.message.text.split(" ");
-  const address = args[1];
 
-  if (!address) return ctx.reply("⚠️ Usage: /balance <wallet_address>");
-
-  try {
-    const balance = await connection.getBalance(new PublicKey(address));
-    ctx.reply(`💸 Balance: ${(balance / 1e9).toFixed(4)} SOL`);
-  } catch (err) {
-    ctx.reply("❌ Invalid wallet address");
-  }
-});
 
 bot.on("my_chat_member", async (ctx: any) => {
   const newStatus = ctx.myChatMember.new_chat_member.status;
@@ -226,25 +252,7 @@ bot.on("my_chat_member", async (ctx: any) => {
   }
 });
 
-bot.command("mybalance", async (ctx) => {
-  console.log("inside the my balance");
-  await ctx.reply("quering from blockchain");
-  const telegramId = ctx.from.id;
-  try {
-    const response = await axios.post(
-      `${process.env.BACKEND_URL}/user/userBalance`,
-      {
-        telegramId,
-      }
-    );
-    const userBalance = response.data.userBalane;
-    console.log("backend response", response.data);
-    ctx.reply("your Balance", userBalance);
-  } catch (error: any) {
-    const errMessage = error?.response?.data.message;
-    console.log(errMessage);
-  }
-});
+
 
 bot.command("help", (ctx) => {
   ctx.reply(

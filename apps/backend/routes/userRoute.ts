@@ -7,7 +7,7 @@ export const userRoute = express.Router();
 
 const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
-userRoute.post("/connectwallet", async (req: Request, res: Response) => {
+userRoute.post("/connectwallet", async (req: Request, res: Response) => {  
   const { telegramId, username, walletAddress, groupId } = req.body;
 
   if (!telegramId || !username || !walletAddress || !groupId) {
