@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-groupchat_fund = "5bDEAfuk7KFuQFdfZUaieL5YtMt3nxUSTGJwcvQuRyu3"
+groupchat_fund = "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
 
 [programs.devnet]
-groupchat_fund = "5bDEAfuk7KFuQFdfZUaieL5YtMt3nxUSTGJwcvQuRyu3"
+groupchat_fund = "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
 
 [registry]
 url = "https://api.apr.dev"
