@@ -1,16 +1,24 @@
-import "./globals.css";
+// app/layout.tsx
 import "@solana/wallet-adapter-react-ui/styles.css";
-import { SolanaProvider } from './components/solanaProvider';
+import "./globals.css";
+import WalletContextProvider from "./components/WalletContextProvider";
+
+export const metadata = {
+  title: "Group Fund",
+  description: "Solana Group Fund Manager",
+};
 
 export default function RootLayout({
-  children
-}: Readonly<{
+  children,
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html>
+    <html lang="en">
       <body>
-        <SolanaProvider>{children}</SolanaProvider>
+        <WalletContextProvider>
+          {children}
+        </WalletContextProvider>
       </body>
     </html>
   );
