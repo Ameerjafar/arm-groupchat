@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  telegramId    String   @unique
-  username      String
-  walletAddress String?  @unique
-  groupId       String?
-  group         Group?   @relation(fields: [groupId], references: [groupId])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  Int      @id @default(autoincrement())
+  telegramId          String   @unique
+  username            String
+  walletAddress       String?  @unique
+  encryptedPrivateKey String
+  groupId             String?
+  group               Group?   @relation(fields: [groupId], references: [groupId])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Group {
@@ -24,4 +25,92 @@ model Group {
   name      String
   members   User[]
   createdAt DateTime @default(now())
+}
+
+model Fund {
+  id                   String         @id @default(uuid())
+  groupId              String         @unique
+  fundPdaAddress       String         @unique
+  authority            String
+  initiator            String?
+  balance              BigInt         @default(0)
+  transactionSignature String?
+  lastSyncedSlot       BigInt?
+  status               FundStatus     @default(ACTIVE)
+  isRecovered          Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  contributions        Contribution[]
+  transactions         Transaction[]
+
+  @@index([groupId])
+  @@index([fundPdaAddress])
+  @@map("funds")
+}
+
+enum FundStatus {
+  ACTIVE
+  CLOSED
+  PAUSED
+}
+
+model Contribution {
+  id            String   @id @default(uuid())
+  fundId        String
+  fund          Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  contributorId String
+  amount        BigInt
+  signature     String   @unique
+  createdAt     DateTime @default(now())
+
+  @@index([fundId])
+  @@index([contributorId])
+  @@map("contributions")
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  fundId      String
+  fund        Fund            @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  amount      BigInt
+  signature   String          @unique
+  fromAddress String?
+  toAddress   String?
+  initiator   String?
+  status      TxStatus        @default(PENDING)
+  slot        BigInt?
+  blockTime   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([fundId])
+  @@index([signature])
+  @@map("transactions")
+}
+
+model FailedSync {
+  id             String  @id @default(uuid())
+  fundPdaAddress String
+  groupId        String
+  errorMessage   String
+  retryCount     Int     @default(0)
+  resolved       Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("failed_syncs")
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TxStatus {
+  PENDING
+  CONFIRMED
+  FAILED
 }

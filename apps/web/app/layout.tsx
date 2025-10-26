@@ -1,11 +1,10 @@
-// app/layout.tsx
-import "@solana/wallet-adapter-react-ui/styles.css";
-import "./globals.css";
-import WalletContextProvider from "./components/WalletContextProvider";
+import { Providers } from './provider';
+import './globals.css';
+import type { Metadata } from 'next';
 
-export const metadata = {
-  title: "Group Fund",
-  description: "Solana Group Fund Manager",
+export const metadata: Metadata = {
+  title: 'Group Fund Bot',
+  description: 'Solana-based group fund management',
 };
 
 export default function RootLayout({
@@ -16,9 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <WalletContextProvider>
+        <Providers>
           {children}
-        </WalletContextProvider>
+        </Providers>
       </body>
     </html>
   );
