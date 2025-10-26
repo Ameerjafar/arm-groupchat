@@ -89,8 +89,7 @@ userRoute.post("/createuser", async (req: Request, res: Response) => {
   }
 });
 
-userRoute.get(
-  "/getUserGroups/:telegramId",
+userRoute.get("/getUserGroups/:telegramId",
   async (req: Request, res: Response) => {
     const { telegramId } = req.params;
     try {

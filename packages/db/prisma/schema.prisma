@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  telegramId    String   @unique
-  username      String
-  walletAddress String?  @unique
-  groupId       String?
-  group         Group?   @relation(fields: [groupId], references: [groupId])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                   Int                    @id @default(autoincrement())
+  telegramId           String                 @unique
+  username             String
+  walletAddress        String?                @unique
+  groupId              String?
+  group                Group?                 @relation(fields: [groupId], references: [groupId])
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  InitiatedTransaction InitiatedTransaction[]
 }
 
 model Group {
@@ -25,3 +26,59 @@ model Group {
   members   User[]
   createdAt DateTime @default(now())
 }
+
+model InitiatedTransaction {
+  id            Int    @id @default(autoincrement())
+  transactionId String @unique @default(uuid())
+
+  userId   Int
+  user     User   @relation(fields: [userId], references: [id])
+  username String
+  chatId   String
+
+  fromToken         String
+  toToken           String
+  fromAmount        Decimal @db.Decimal(20, 8)
+  estimatedToAmount Decimal @db.Decimal(20, 8)
+
+  fromTokenPrice    Decimal @db.Decimal(20, 8)
+  toTokenPrice      Decimal @db.Decimal(20, 8)
+  estimatedValueUSD Decimal @db.Decimal(20, 8)
+
+  status TransactionStatus @default(INITIATED)
+
+  initiatedAt DateTime  @default(now())
+  completedAt DateTime?
+  failedAt    DateTime?
+
+  errorMessage String?
+
+  priceSource String  @default("binance")
+  ipAddress   String?
+  userAgent   String?
+
+  @@index([userId])
+  @@index([chatId])
+  @@index([status])
+  @@index([initiatedAt])
+}
+
+enum TransactionStatus {
+  INITIATED
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model ProfitDistribution {
+  id            Int      @id @default(autoincrement())
+  chatId        String
+  initiatorId   String
+  totalProfit   Float
+  distributions String   // JSON string
+  distributedAt DateTime @default(now())
+  
+  @@index([chatId])
+}
+

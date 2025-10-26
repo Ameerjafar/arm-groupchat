@@ -243,7 +243,6 @@ fn calculate_reputation_loss(pnl_bps: i64) -> u32 {
 }
 
 // Account Structures
-
 #[account]
 pub struct Fund {
     pub authority: Pubkey,
