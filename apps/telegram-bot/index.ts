@@ -201,6 +201,7 @@ bot.command("mybalance", async (ctx) => {
 });
 
 bot.command("trade", async (ctx) => {
+  console.log("it is working properly");
   try {
     const chatId = ctx.chat.id;
     const admins = await ctx.telegram.getChatAdministrators(chatId);
@@ -219,6 +220,7 @@ bot.command("trade", async (ctx) => {
 
     ctx.session ??= {};
     ctx.session.waitingForTradeDetails = true;
+    console.log(ctx.session);
   } catch (err) {
     console.error("Error in /trade:", err);
     await ctx.reply("⚠️ Could not initiate trade. Try again later.");
@@ -287,6 +289,7 @@ bot.command("register", async (ctx) => {
     const groupId = ctx.chat.id.toString();
 
     try {
+      console.log("working properly");
       const createUserRes = await axios.post(
         `${process.env.BACKEND_URL}/user/createuser`,
         {
@@ -295,7 +298,7 @@ bot.command("register", async (ctx) => {
           groupId,
         }
       );
-
+      console.log("working under the hood");
       await ctx.reply(`✅ You have been registered successfully!`);
       console.log(`✅ User created: ${createUserRes.data.message || "Success"}`);
     } catch (error: any) {
@@ -319,6 +322,7 @@ bot.command("register", async (ctx) => {
 // ============================================
 
 bot.on("text", async (ctx) => {
+  console.log("text is working");
   ctx.session ??= {};
 
   if (ctx.session.waitingForSellDetails) {
@@ -326,6 +330,7 @@ bot.on("text", async (ctx) => {
     ctx.session.waitingForSellDetails = false;
 
     try {
+      console.log("here making trade");
       const response = await axios.post(
         `${process.env.BACKEND_URL}/trade/makeTrade`,
         {
@@ -359,6 +364,7 @@ bot.on("text", async (ctx) => {
 
   // Handle trade details input
   if (ctx.session.waitingForTradeDetails) {
+    console.log("summa log")
     const tradeDetails = ctx.message.text.trim();
     ctx.session.waitingForTradeDetails = false;
 
@@ -371,6 +377,7 @@ bot.on("text", async (ctx) => {
         username: ctx.from.username,
         tradeDetails,
       });
+      console.log("after the make trade ")
 
       if (response.data.success) {
         await ctx.reply(`✅ Trade executed successfully!\n${response.data.message}`);
@@ -378,7 +385,7 @@ bot.on("text", async (ctx) => {
         await ctx.reply(`⚠️ Error: ${response.data.message || "Something went wrong."}`);
       }
     } catch (error) {
-      console.error("Error in trade execution:", error);
+      // console.error("Error in trade execution:", error);
       await ctx.reply("⚠️ Failed to execute trade. Please try again.");
     }
     return; // Important: Exit after handling
