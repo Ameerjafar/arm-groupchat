@@ -7,10 +7,10 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import idl from "../../../packages/idl.json";
+import idl from "../../../../packages/idl.json";
 import bs58 from "bs58";
 import { prisma } from "@repo/db";
-import { decrypt } from "./utlis";
+import { decrypt } from "../utlis";
 
 const connection = new Connection(
   process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
@@ -26,6 +26,7 @@ export async function initializeFundOnBlockchain(
 ) {
   try {
     // Get user
+    console.log("it is working properly");
     const user = await prisma.user.findUnique({
       where: { telegramId },
     });
@@ -123,8 +124,6 @@ export async function initializeFundOnBlockchain(
     );
 
     const program = new anchor.Program(idl as anchor.Idl, provider);
-
-    // Derive PDA
     const [fundPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("fund"), Buffer.from(groupId)],
       program.programId

@@ -6,6 +6,7 @@ import { registerFundCommands } from "./commands/fundCommands";
 import { registerGeneralCommands } from "./commands/generalCommands";
 import { registerEventHandlers } from "./handlers/eventHandlers";
 import { registerErrorHandlers } from "./middleware/errorMiddleware";
+import { registerContributorCommands } from "./commands/contributeCommands";
 
 console.log("🔄 Initializing bot...");
 
@@ -15,53 +16,32 @@ bot.use(session());
 
 console.log("📝 Registering commands...");
 
-try {
-  console.log("  → Registering wallet commands...");
-  registerWalletCommands(bot);
-  console.log("  ✓ Wallet commands registered");
-} catch (error) {
-  console.error("  ✗ Error in wallet commands:", error);
-  process.exit(1);
-}
+console.log("  → Registering wallet commands...");
+registerWalletCommands(bot);
+console.log("  ✓ Wallet commands registered");
 
-try {
-  console.log("  → Registering fund commands...");
-  registerFundCommands(bot);
-  console.log("  ✓ Fund commands registered");
-} catch (error) {
-  console.error("  ✗ Error in fund commands:", error);
-  process.exit(1);
-}
+console.log("  → Registering fund commands...");
+registerFundCommands(bot);
+console.log("  ✓ Fund commands registered");
 
-try {
-  console.log("  → Registering general commands...");
-  registerGeneralCommands(bot);
-  console.log("  ✓ General commands registered");
-} catch (error) {
-  console.error("  ✗ Error in general commands:", error);
-  process.exit(1);
-}
+console.log("  → Registering contributor commands...");
+registerContributorCommands(bot);
+console.log("  ✓ Contributor commands registered");
 
-try {
-  console.log("  → Registering event handlers...");
-  registerEventHandlers(bot);
-  console.log("  ✓ Event handlers registered");
-} catch (error) {
-  console.error("  ✗ Error in event handlers:", error);
-  process.exit(1);
-}
+console.log("  → Registering general commands...");
+registerGeneralCommands(bot);
+console.log("  ✓ General commands registered");
 
-try {
-  console.log("  → Registering error handlers...");
-  registerErrorHandlers(bot);
-  console.log("  ✓ Error handlers registered");
-} catch (error) {
-  console.error("  ✗ Error in error handlers:", error);
-  process.exit(1);
-}
+console.log("  → Registering event handlers...");
+registerEventHandlers(bot);
+console.log("  ✓ Event handlers registered");
+
+console.log("  → Registering error handlers...");
+registerErrorHandlers(bot);
+console.log("  ✓ Error handlers registered");
 
 console.log("🚀 Launching bot...");
-console.log(bot.botInfo?.username)
+console.log(bot.botInfo?.username);
 bot.launch();
 
 console.log("✅ Bot launch initiated successfully!");

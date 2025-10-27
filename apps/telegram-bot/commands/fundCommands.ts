@@ -86,9 +86,10 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     const userId = ctx.from.id.toString();
 
     if (ctx.chat.type === "private") {
-      return ctx.reply("⚠️ This command only works in **group chats**.", {
-        parse_mode: "Markdown",
-      });
+      return ctx.reply(
+        "⚠️ This command only works in **group chats**.",
+        { parse_mode: "Markdown" }
+      );
     }
 
     try {
@@ -96,7 +97,8 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       const member = await ctx.getChatMember(parseInt(userId));
       if (member.status !== "creator" && member.status !== "administrator") {
         return ctx.reply(
-          "🚫 **Admin Only**\n\n" + "Only group admins can pause the fund.",
+          "🚫 **Admin Only**\n\n" +
+            "Only group admins can pause the fund.",
           { parse_mode: "Markdown" }
         );
       }
@@ -106,13 +108,13 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       const result = await fundService.updateFundStatus({
         groupId: chatId,
         telegramId: userId,
-        status: "PAUSED",
+        status: "PAUSED"
       });
 
       return ctx.reply(
         "⏸️ **Fund Paused**\n\n" +
           "The fund is now paused. No contributions or trades can be made.\n\n" +
-          `Transaction: \`${result.data.transactionSignature || "N/A"}\`\n\n` +
+          `Transaction: \`${result.data.transactionSignature || 'N/A'}\`\n\n` +
           "Use /resumefund to resume operations.",
         { parse_mode: "Markdown" }
       );
@@ -129,9 +131,10 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     const userId = ctx.from.id.toString();
 
     if (ctx.chat.type === "private") {
-      return ctx.reply("⚠️ This command only works in **group chats**.", {
-        parse_mode: "Markdown",
-      });
+      return ctx.reply(
+        "⚠️ This command only works in **group chats**.",
+        { parse_mode: "Markdown" }
+      );
     }
 
     try {
@@ -139,7 +142,8 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       const member = await ctx.getChatMember(parseInt(userId));
       if (member.status !== "creator" && member.status !== "administrator") {
         return ctx.reply(
-          "🚫 **Admin Only**\n\n" + "Only group admins can resume the fund.",
+          "🚫 **Admin Only**\n\n" +
+            "Only group admins can resume the fund.",
           { parse_mode: "Markdown" }
         );
       }
@@ -155,7 +159,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       return ctx.reply(
         "▶️ **Fund Resumed**\n\n" +
           "The fund is now active. Contributions and trades can continue.\n\n" +
-          `Transaction: \`${result.data.transactionSignature || "N/A"}\``,
+          `Transaction: \`${result.data.transactionSignature || 'N/A'}\``,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
@@ -166,15 +170,15 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
   });
 
   // CLOSE FUND Command
-  // Better approach: Use inline keyboard buttons for confirmation
   bot.command("closefund", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
 
     if (ctx.chat.type === "private") {
-      return ctx.reply("⚠️ This command only works in **group chats**.", {
-        parse_mode: "Markdown",
-      });
+      return ctx.reply(
+        "⚠️ This command only works in **group chats**.",
+        { parse_mode: "Markdown" }
+      );
     }
 
     try {
@@ -182,12 +186,13 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       const member = await ctx.getChatMember(parseInt(userId));
       if (member.status !== "creator" && member.status !== "administrator") {
         return ctx.reply(
-          "🚫 **Admin Only**\n\n" + "Only group admins can close the fund.",
+          "🚫 **Admin Only**\n\n" +
+            "Only group admins can close the fund.",
           { parse_mode: "Markdown" }
         );
       }
 
-      // Send confirmation with inline buttons
+      // Confirmation prompt
       await ctx.reply(
         "⚠️ **Close Fund Confirmation**\n\n" +
           "Are you sure you want to close this fund?\n\n" +
@@ -195,154 +200,49 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
           "• All members must withdraw their funds first\n" +
           "• The fund balance must be zero\n" +
           "• This action cannot be undone\n" +
-          "• Rent will be reclaimed to your wallet",
-        {
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: "✅ Yes, Close Fund",
-                  callback_data: `close_fund_confirm:${chatId}:${userId}`,
-                },
-                {
-                  text: "❌ Cancel",
-                  callback_data: `close_fund_cancel:${chatId}:${userId}`,
-                },
-              ],
-            ],
-          },
-        }
+          "• Rent will be reclaimed to your wallet\n\n" +
+          "Reply with `yes` to confirm or `no` to cancel.",
+        { parse_mode: "Markdown" }
       );
+
+      // Wait for confirmation
+      bot.hears(/^yes$/i, async (confirmCtx) => {
+        if (confirmCtx.from.id.toString() !== userId) return;
+        if (confirmCtx.chat.id.toString() !== chatId) return;
+
+        try {
+          await confirmCtx.reply("⏳ Closing fund... This may take a moment.");
+
+          const result = await fundService.closeFund({
+            groupId: chatId,
+            telegramId: userId,
+          });
+
+          return confirmCtx.reply(
+            "✅ **Fund Closed Successfully!**\n\n" +
+              `Transaction: \`${result.data.transactionSignature || 'N/A'}\`\n` +
+              `${result.data.rentReclaimed ? '💰 Rent has been reclaimed to your wallet!' : ''}\n\n` +
+              `View on Solscan: https://solscan.io/tx/${result.data.transactionSignature}?cluster=devnet`,
+            { parse_mode: "Markdown" }
+          );
+        } catch (error: any) {
+          console.error("Close fund error:", error);
+          const message = error.response?.data?.message || "Failed to close fund";
+          confirmCtx.reply(`❌ **Error**: ${message}`, { parse_mode: "Markdown" });
+        }
+      });
+
+      bot.hears(/^no$/i, async (confirmCtx) => {
+        if (confirmCtx.from.id.toString() !== userId) return;
+        if (confirmCtx.chat.id.toString() !== chatId) return;
+
+        confirmCtx.reply("❌ Fund closure cancelled.", { parse_mode: "Markdown" });
+      });
     } catch (error: any) {
       console.error("Close fund error:", error);
       ctx.reply("❌ Failed to process request.", { parse_mode: "Markdown" });
     }
   });
-
-  // Handle confirmation button clicks
-  bot.action(/^close_fund_confirm:(.+):(.+)$/, async (ctx) => {
-    const [, chatId, requestUserId] = ctx.match;
-    const clickUserId = ctx.from.id.toString();
-
-    // Verify the person clicking is the one who initiated
-    if (clickUserId !== requestUserId) {
-      return ctx.answerCbQuery(
-        "⚠️ Only the person who initiated can confirm.",
-        { show_alert: true }
-      );
-    }
-
-    try {
-      // Answer the callback query to remove loading state
-      await ctx.answerCbQuery();
-
-      // Edit the message to show processing
-      await ctx.editMessageText(
-        "⏳ **Closing fund...**\n\nThis may take a moment.",
-        { parse_mode: "Markdown" }
-      );
-
-      const result = await fundService.closeFund({
-        groupId: chatId as string,
-        telegramId: requestUserId,
-      });
-
-      // Edit message with success
-      await ctx.editMessageText(
-        "✅ **Fund Closed Successfully!**\n\n" +
-          `Transaction: \`${result.data.transactionSignature || "N/A"}\`\n` +
-          `${result.data.rentReclaimed ? "💰 Rent has been reclaimed to your wallet!" : ""}\n\n` +
-          `View on Solscan: https://solscan.io/tx/${result.data.transactionSignature}?cluster=devnet`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (error: any) {
-      console.error("Close fund error:", error);
-      const message = error.response?.data?.message || "Failed to close fund";
-
-      await ctx.editMessageText(
-        `❌ **Error**: ${message}\n\n` +
-          "The fund was not closed. Please ensure:\n" +
-          "• All members have withdrawn their funds\n" +
-          "• Fund balance is zero\n" +
-          "• You are the fund creator",
-        { parse_mode: "Markdown" }
-      );
-    }
-  });
-
-  // Handle cancel button click
-  bot.action(/^close_fund_cancel:(.+):(.+)$/, async (ctx) => {
-    const [, chatId, requestUserId] = ctx.match;
-    const clickUserId = ctx.from.id.toString();
-
-    // Verify the person clicking is the one who initiated
-    if (clickUserId !== requestUserId) {
-      return ctx.answerCbQuery("⚠️ Only the person who initiated can cancel.", {
-        show_alert: true,
-      });
-    }
-
-    await ctx.answerCbQuery();
-    await ctx.editMessageText(
-      "❌ **Fund closure cancelled.**\n\nThe fund remains active.",
-      { parse_mode: "Markdown" }
-    );
-  });
-
-  // CONTRIBUTE Command
-  bot.command("contribute", async (ctx) => {
-    const chatId = ctx.chat.id.toString();
-    const userId = ctx.from.id.toString();
-
-    if (ctx.chat.type === "private") {
-      return ctx.reply(
-        "⚠️ This command only works in **group chats**.\n\n" +
-          "Join a group with an active fund to contribute.",
-        { parse_mode: "Markdown" }
-      );
-    }
-
-    try {
-      const walletCheck = await walletService.checkWallet(userId);
-
-      if (!walletCheck.hasWallet) {
-        return ctx.reply(
-          "⚠️ **Wallet Required**\n\n" +
-            "You need a wallet before contributing.\n\n" +
-            "👉 Send /start to me in **private chat** to create your wallet.",
-          { parse_mode: "Markdown" }
-        );
-      }
-
-      const fundExists = await fundService.checkFundExists(chatId);
-
-      if (!fundExists) {
-        return ctx.reply(
-          "⚠️ **No Fund Found**\n\n" +
-            "This group doesn't have a fund yet.\n" +
-            "Ask an admin to use /initfund to create one."
-        );
-      }
-
-      const webAppUrl = `${config.webAppUrl}/contribute?groupId=${chatId}&userId=${userId}`;
-
-      ctx.reply(
-        "💰 **Contribute to Fund**\n\n" +
-          "Click the button below to make your contribution:",
-        Markup.inlineKeyboard([
-          [Markup.button.webApp("💰 Contribute Now", webAppUrl)],
-        ])
-      );
-    } catch (error) {
-      console.error("Error in /contribute:", error);
-      ctx.reply(
-        "❌ **Could not process request**\n\n" +
-          "Please try again or contact support."
-      );
-    }
-  });
-
   // FUND INFO Command
   bot.command("fundinfo", async (ctx) => {
     const chatId = ctx.chat.id.toString();
@@ -367,12 +267,8 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       }
 
       const data = fund.data;
-      const status =
-        data.status === "ACTIVE"
-          ? "🟢 Active"
-          : data.status === "PAUSED"
-            ? "🟡 Paused"
-            : "🔴 Closed";
+      const status = data.status === "ACTIVE" ? "🟢 Active" : 
+                     data.status === "PAUSED" ? "🟡 Paused" : "🔴 Closed";
       const owner = data.owner
         ? `[${data.owner.username ?? "Owner"}](tg://user?id=${data.owner.telegramId})`
         : "Unknown";
@@ -407,46 +303,46 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
   });
 
   // MY SHARES Command
-  bot.command("myshares", async (ctx) => {
-    const chatId = ctx.chat.id.toString();
-    const userId = ctx.from.id.toString();
+  // bot.command("myshares", async (ctx) => {
+  //   const chatId = ctx.chat.id.toString();
+  //   const userId = ctx.from.id.toString();
 
-    if (ctx.chat.type === "private") {
-      return ctx.reply(
-        "⚠️ This command only works in **group chats**.\n\n" +
-          "Use this in a group to view your position.",
-        { parse_mode: "Markdown" }
-      );
-    }
+  //   if (ctx.chat.type === "private") {
+  //     return ctx.reply(
+  //       "⚠️ This command only works in **group chats**.\n\n" +
+  //         "Use this in a group to view your position.",
+  //       { parse_mode: "Markdown" }
+  //     );
+  //   }
 
-    try {
-      const member = await fundService.getMemberInfo(chatId, userId);
+  //   try {
+  //     const member = await fundService.getMemberInfo(chatId, userId);
 
-      ctx.reply(
-        `👤 **Your Position**\n\n` +
-          `📈 Shares: ${member.shares}\n` +
-          `💰 Total Contributed: ${(member.totalContributed / 1e9).toFixed(2)} SOL\n` +
-          `👔 Role: ${member.role}\n` +
-          `⭐ Reputation: ${member.reputationScore}\n\n` +
-          `Use /contribute to add more!`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (error: any) {
-      if (error.response?.status === 404) {
-        ctx.reply(
-          "⚠️ **No Position Found**\n\n" +
-            "You haven't contributed to this fund yet.\n" +
-            "Use /contribute to join!"
-        );
-      } else {
-        console.error("Error fetching member info:", error);
-        ctx.reply(
-          "❌ **Could not fetch your information**\n\n" +
-            "Please try again later."
-        );
-      }
-    }
-  });
+  //     ctx.reply(
+  //       `👤 **Your Position**\n\n` +
+  //         `📈 Shares: ${member.shares}\n` +
+  //         `💰 Total Contributed: ${(member.totalContributed / 1e9).toFixed(2)} SOL\n` +
+  //         `👔 Role: ${member.role}\n` +
+  //         `⭐ Reputation: ${member.reputationScore}\n\n` +
+  //         `Use /contribute to add more!`,
+  //       { parse_mode: "Markdown" }
+  //     );
+  //   } catch (error: any) {
+  //     if (error.response?.status === 404) {
+  //       ctx.reply(
+  //         "⚠️ **No Position Found**\n\n" +
+  //           "You haven't contributed to this fund yet.\n" +
+  //           "Use /contribute to join!"
+  //       );
+  //     } else {
+  //       console.error("Error fetching member info:", error);
+  //       ctx.reply(
+  //         "❌ **Could not fetch your information**\n\n" +
+  //           "Please try again later."
+  //       );
+  //     }
+  //   }
+  // });
 
   // HELP Command - List all fund commands
   bot.command("fundhelp", async (ctx) => {

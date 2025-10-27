@@ -57,17 +57,21 @@ enum FundStatus {
   PAUSED
 }
 
+// Tracks contributions (for historical record)
 model Contribution {
-  id            String   @id @default(uuid())
-  fundId        String
-  fund          Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
-  contributorId String
-  amount        BigInt
-  signature     String   @unique
-  createdAt     DateTime @default(now())
+  id                    String   @id @default(uuid())
+  fundId                String
+  fund                  Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  contributorTelegramId String
+  contributorWallet     String
+  amount                BigInt // in lamports
+  sharesMinted          BigInt // shares received
+  transactionSignature  String   @unique
+  createdAt             DateTime @default(now())
 
   @@index([fundId])
-  @@index([contributorId])
+  @@index([contributorTelegramId])
+  @@index([contributorWallet])
   @@map("contributions")
 }
 
@@ -84,32 +88,33 @@ model Transaction {
   status      TxStatus        @default(PENDING)
   slot        BigInt?
   blockTime   DateTime?
-
-  createdAt DateTime @default(now())
+  createdAt   DateTime        @default(now())
 
   @@index([fundId])
   @@index([signature])
+  @@index([type])
   @@map("transactions")
 }
 
 model FailedSync {
-  id             String  @id @default(uuid())
+  id             String   @id @default(uuid())
   fundPdaAddress String
   groupId        String
   errorMessage   String
-  retryCount     Int     @default(0)
-  resolved       Boolean @default(false)
+  retryCount     Int      @default(0)
+  resolved       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  @@index([resolved])
   @@map("failed_syncs")
 }
 
 enum TransactionType {
-  DEPOSIT
+  CONTRIBUTION
   WITHDRAWAL
-  TRANSFER
+  TRADE
+  FEE
 }
 
 enum TxStatus {

@@ -12,6 +12,6 @@ routes.use("/user", userRoute);
 
 routes.use("/fund", fundRoute);
 
-routes.use("/contribtion", contributionRoute);
+routes.use("/contribution", contributionRoute);
 
 routes.use("/trasaction", transactionRoute);

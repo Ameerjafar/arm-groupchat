@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_lang::system_program::{transfer, Transfer as SystemTransfer};
 
 declare_id!("9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy");
 
@@ -28,35 +28,25 @@ pub mod groupchat_fund {
         Ok(())
     }
 
-    // ✅ ADD THIS: Close Fund Function
     pub fn close_fund(ctx: Context<CloseFund>) -> Result<()> {
         let fund = &ctx.accounts.fund;
-        
+
         // Only authority can close
         require!(
             ctx.accounts.authority.key() == fund.authority,
             ErrorCode::UnauthorizedClose
         );
-        
+
         // Fund must be empty
-        require!(
-            fund.total_value == 0,
-            ErrorCode::FundNotEmpty
-        );
-        
-        require!(
-            fund.total_shares == 0,
-            ErrorCode::SharesRemaining
-        );
-        
+        require!(fund.total_value == 0, ErrorCode::FundNotEmpty);
+
+        require!(fund.total_shares == 0, ErrorCode::SharesRemaining);
+
         msg!("Fund closed for group: {}", fund.group_id);
         Ok(())
     }
 
-    pub fn add_member(
-        ctx: Context<AddMember>,
-        telegram_id: String,
-    ) -> Result<()> {
+    pub fn add_member(ctx: Context<AddMember>, telegram_id: String) -> Result<()> {
         let member = &mut ctx.accounts.member;
         member.wallet = ctx.accounts.member_wallet.key();
         member.telegram_id = telegram_id;
@@ -71,25 +61,31 @@ pub mod groupchat_fund {
         Ok(())
     }
 
-    pub fn contribute(
-        ctx: Context<Contribute>,
-        amount: u64,
-    ) -> Result<()> {
+    // ✅ UPDATED: Native SOL contribution
+    pub fn contribute(ctx: Context<Contribute>, amount: u64) -> Result<()> {
+        // ✅ Read-only checks first (before any mutable borrows)
+        require!(ctx.accounts.fund.is_active, ErrorCode::FundNotActive);
+        require!(ctx.accounts.member.is_active, ErrorCode::MemberNotActive);
+        require!(
+            amount >= ctx.accounts.fund.min_contribution,
+            ErrorCode::BelowMinContribution
+        );
+
+        // ✅ Transfer SOL (using immutable references)
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            SystemTransfer {
+                from: ctx.accounts.member_wallet.to_account_info(),
+                to: ctx.accounts.fund.to_account_info(),
+            },
+        );
+        transfer(cpi_context, amount)?;
+
+        // ✅ NOW get mutable borrows for state updates
         let fund = &mut ctx.accounts.fund;
         let member = &mut ctx.accounts.member;
 
-        require!(fund.is_active, ErrorCode::FundNotActive);
-        require!(member.is_active, ErrorCode::MemberNotActive);
-        require!(amount >= fund.min_contribution, ErrorCode::BelowMinContribution);
-
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.member_token_account.to_account_info(),
-            to: ctx.accounts.vault_token_account.to_account_info(),
-            authority: ctx.accounts.member_wallet.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
-        token::transfer(cpi_ctx, amount)?;
-
+        // Calculate shares to mint
         let shares_to_mint = if fund.total_shares == 0 {
             amount
         } else {
@@ -100,12 +96,17 @@ pub mod groupchat_fund {
                 .unwrap() as u64
         };
 
+        // Update state
         member.shares += shares_to_mint;
         member.total_contributed += amount;
         fund.total_shares += shares_to_mint;
         fund.total_value += amount;
 
-        msg!("Contributed {} tokens, minted {} shares", amount, shares_to_mint);
+        msg!(
+            "Contributed {} lamports, minted {} shares",
+            amount,
+            shares_to_mint
+        );
         Ok(())
     }
 
@@ -161,7 +162,9 @@ pub mod groupchat_fund {
             member.reputation_score += calculate_reputation_gain(actual_pnl);
         } else {
             member.failed_trades += 1;
-            member.reputation_score = member.reputation_score.saturating_sub(calculate_reputation_loss(actual_pnl));
+            member.reputation_score = member
+                .reputation_score
+                .saturating_sub(calculate_reputation_loss(actual_pnl));
         }
 
         trade.actual_pnl = actual_pnl;
@@ -171,8 +174,12 @@ pub mod groupchat_fund {
         Ok(())
     }
 
+    // ✅ UPDATED: Native SOL withdrawal
     pub fn withdraw(ctx: Context<Withdraw>, shares_to_burn: u64) -> Result<()> {
-        require!(ctx.accounts.member.shares >= shares_to_burn, ErrorCode::InsufficientShares);
+        require!(
+            ctx.accounts.member.shares >= shares_to_burn,
+            ErrorCode::InsufficientShares
+        );
 
         let withdrawal_amount = (shares_to_burn as u128)
             .checked_mul(ctx.accounts.fund.total_value as u128)
@@ -180,26 +187,28 @@ pub mod groupchat_fund {
             .checked_div(ctx.accounts.fund.total_shares as u128)
             .unwrap() as u64;
 
-        let seeds = &[
-            b"fund".as_ref(),
-            ctx.accounts.fund.group_id.as_bytes(),
-            &[ctx.accounts.fund.bump],
-        ];
-        let signer = &[&seeds[..]];
+        // Transfer native SOL from fund PDA to member
+        **ctx
+            .accounts
+            .fund
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= withdrawal_amount;
+        **ctx
+            .accounts
+            .member_wallet
+            .to_account_info()
+            .try_borrow_mut_lamports()? += withdrawal_amount;
 
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.vault_token_account.to_account_info(),
-            to: ctx.accounts.member_token_account.to_account_info(),
-            authority: ctx.accounts.fund.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts, signer);
-        token::transfer(cpi_ctx, withdrawal_amount)?;
-
+        // Update state
         ctx.accounts.member.shares -= shares_to_burn;
         ctx.accounts.fund.total_shares -= shares_to_burn;
         ctx.accounts.fund.total_value -= withdrawal_amount;
 
-        msg!("Withdrew {} tokens by burning {} shares", withdrawal_amount, shares_to_burn);
+        msg!(
+            "Withdrew {} lamports by burning {} shares",
+            withdrawal_amount,
+            shares_to_burn
+        );
         Ok(())
     }
 
@@ -284,12 +293,11 @@ pub struct InitializeFund<'info> {
     pub system_program: Program<'info, System>,
 }
 
-// ✅ ADD THIS: CloseFund Accounts
 #[derive(Accounts)]
 pub struct CloseFund<'info> {
     #[account(
         mut,
-        close = authority, // Sends rent back to authority
+        close = authority,
         seeds = [b"fund", fund.group_id.as_bytes()],
         bump = fund.bump
     )]
@@ -316,6 +324,7 @@ pub struct AddMember<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// ✅ UPDATED: Native SOL contribute accounts
 #[derive(Accounts)]
 pub struct Contribute<'info> {
     #[account(mut)]
@@ -327,12 +336,8 @@ pub struct Contribute<'info> {
     )]
     pub member: Account<'info, Member>,
     #[account(mut)]
-    pub member_token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
-    pub vault_token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
     pub member_wallet: Signer<'info>,
-    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -367,19 +372,16 @@ pub struct SettleTrade<'info> {
     pub authority: Signer<'info>,
 }
 
+// ✅ UPDATED: Native SOL withdraw accounts
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
     #[account(mut)]
     pub fund: Account<'info, Fund>,
     #[account(mut)]
     pub member: Account<'info, Member>,
-    #[account(mut)]
-    pub member_token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
-    pub vault_token_account: Account<'info, TokenAccount>,
     #[account(mut, constraint = member_wallet.key() == member.wallet)]
     pub member_wallet: Signer<'info>,
-    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -414,7 +416,6 @@ pub enum ErrorCode {
     TradeAlreadySettled,
     #[msg("Insufficient shares to withdraw")]
     InsufficientShares,
-    // ✅ ADD THESE: New error codes for close_fund
     #[msg("Only fund authority can close the fund")]
     UnauthorizedClose,
     #[msg("Fund must be empty (total_value = 0) before closing")]
