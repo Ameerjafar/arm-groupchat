@@ -16,6 +16,7 @@ model User {
   group                Group?                 @relation(fields: [groupId], references: [groupId])
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
+  privateKey           String?
   InitiatedTransaction InitiatedTransaction[]
 }
 
@@ -35,6 +36,7 @@ model InitiatedTransaction {
   user     User   @relation(fields: [userId], references: [id])
   username String
   chatId   String
+   signature         String?
 
   fromToken         String
   toToken           String

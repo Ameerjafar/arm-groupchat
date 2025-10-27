@@ -43,90 +43,90 @@ const DEVNET_TOKEN_MINTS: { [key: string]: string } = {
 };
 
 // Jupiter API helper function for DEVNET
-async function getJupiterDevnetSwapTransaction(
+// Real Jupiter integration for devnet/mainnet
+async function executeJupiterSwap(
   inputMint: string,
   outputMint: string,
   amount: number,
-  userPublicKey: string,
-  slippageBps: number = 100 // 1% slippage for devnet
+  userWalletKeypair: Keypair,
+  slippageBps: number = 100
 ) {
   try {
-    // NOTE: Jupiter doesn't have full devnet support
-    // For testing, we'll simulate the swap logic
-    console.log('🧪 DEVNET MODE: Simulating Jupiter swap...');
+    // Convert amount to lamports/smallest unit
+    const amountInSmallestUnit = Math.floor(amount * 1e9);
 
-    // Simulate price calculation (you can adjust these)
-    const mockPrices: { [key: string]: number } = {
-      'SOL': 100,
-      'USDC': 1,
-      'USDT': 1,
-    };
+    console.log('🔄 Fetching Jupiter quote...');
 
-    const inputToken = Object.keys(DEVNET_TOKEN_MINTS).find(
-      key => DEVNET_TOKEN_MINTS[key] === inputMint
-    ) || 'SOL';
+    // Step 1: Get quote from Jupiter
+    const quoteResponse = await fetch(
+      `https://quote-api.jup.ag/v6/quote?` +
+      `inputMint=${inputMint}&` +
+      `outputMint=${outputMint}&` +
+      `amount=${amountInSmallestUnit}&` +
+      `slippageBps=${slippageBps}`
+    );
 
-    const outputToken = Object.keys(DEVNET_TOKEN_MINTS).find(
-      key => DEVNET_TOKEN_MINTS[key] === outputMint
-    ) || 'USDC';
+    if (!quoteResponse.ok) {
+      throw new Error('Failed to get Jupiter quote');
+    }
 
-    const inputPrice = mockPrices[inputToken] || 1;
-    const outputPrice = mockPrices[outputToken] || 1;
+    const quoteData = await quoteResponse.json();
+    console.log('✅ Quote received:', quoteData);
 
-    const estimatedOutput = (amount * inputPrice) / outputPrice;
-    const slippageAdjusted = estimatedOutput * (1 - slippageBps / 10000);
-
-    return {
-      transaction: null, // No actual transaction for simulation
-      quote: {
-        inputMint,
-        outputMint,
-        inAmount: Math.floor(amount * 1e9),
-        outAmount: Math.floor(slippageAdjusted * 1e9),
-        priceImpactPct: '0.1',
+    // Step 2: Get swap transaction
+    const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
       },
-      outputAmount: Math.floor(slippageAdjusted * 1e9),
-      simulated: true
-    };
-  } catch (error: any) {
-    console.error('Swap simulation error:', error);
-    throw new Error(`Failed to simulate swap: ${error.message}`);
-  }
-}
+      body: JSON.stringify({
+        quoteResponse: quoteData,
+        userPublicKey: userWalletKeypair.publicKey.toBase58(),
+        wrapAndUnwrapSol: true,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: 'auto'
+      })
+    });
 
-// Simple devnet token transfer (for actual testing)
-async function createDevnetTokenTransfer(
-  fromWallet: string,
-  toWallet: string,
-  amount: number,
-  tokenMint: string
-) {
-  try {
-    const fromPubkey = new PublicKey(fromWallet);
-    const toPubkey = new PublicKey(toWallet);
-    const mintPubkey = new PublicKey(tokenMint);
+    if (!swapResponse.ok) {
+      throw new Error('Failed to get swap transaction');
+    }
 
-    // Get or create associated token accounts
-    const fromTokenAccount = await getAssociatedTokenAddress(
-      mintPubkey,
-      fromPubkey
-    );
+    const { swapTransaction } = await swapResponse.json();
 
-    const toTokenAccount = await getAssociatedTokenAddress(
-      mintPubkey,
-      toPubkey
-    );
+    // Step 3: Deserialize and sign transaction
+    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
+    const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
-    console.log('From Token Account:', fromTokenAccount.toBase58());
-    console.log('To Token Account:', toTokenAccount.toBase58());
+    transaction.sign([userWalletKeypair]);
+
+    // Step 4: Send transaction
+    console.log('📤 Sending transaction...');
+    const signature = await connection.sendTransaction(transaction, {
+      skipPreflight: false,
+      maxRetries: 3
+    });
+
+    // Step 5: Confirm transaction
+    console.log('⏳ Confirming transaction...');
+    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+
+    console.log('✅ Swap successful!');
+    console.log('Transaction:', `https://solscan.io/tx/${signature}`);
 
     return {
-      fromTokenAccount: fromTokenAccount.toBase58(),
-      toTokenAccount: toTokenAccount.toBase58(),
-      amount: Math.floor(amount * 1e9) // Convert to smallest unit
+      signature,
+      inputAmount: amount,
+      outputAmount: parseInt(quoteData.outAmount) / 1e9,
+      explorerUrl: `https://solscan.io/tx/${signature}`
     };
+
   } catch (error: any) {
-    console.error('Token transfer setup error:', error);
+    console.error('Jupiter swap error:', error);
     throw error;
   }
 }
@@ -163,7 +163,7 @@ tradeRoute.post("/makeTrade", async (req: Request<{}, {}, TradeBody>, res: Respo
       });
     }
 
-    // Find user by Telegram ID
+    // Find user by Telegram ID - THIS WAS MISSING
     const user = await prisma.user.findUnique({
       where: { telegramId: userId.toString() }
     });
@@ -183,6 +183,16 @@ tradeRoute.post("/makeTrade", async (req: Request<{}, {}, TradeBody>, res: Respo
       });
     }
 
+    if (!user.privateKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Private key not found. Please reconnect your wallet."
+      });
+    }
+
+    // Reconstruct keypair from stored private key
+    const keypair = Keypair.fromSecretKey(bs58.decode(user.privateKey));
+
     // Get token mint addresses
     const fromTokenMint = DEVNET_TOKEN_MINTS[fromToken.toUpperCase()];
     const toTokenMint = DEVNET_TOKEN_MINTS[toToken.toUpperCase()];
@@ -190,45 +200,24 @@ tradeRoute.post("/makeTrade", async (req: Request<{}, {}, TradeBody>, res: Respo
     if (!fromTokenMint || !toTokenMint) {
       return res.status(400).json({
         success: false,
-        message: `Token not supported on devnet. Supported tokens: ${Object.keys(DEVNET_TOKEN_MINTS).join(', ')}`
+        message: `Token not supported. Supported: ${Object.keys(DEVNET_TOKEN_MINTS).join(', ')}`
       });
-    }
-
-    // Check wallet balance on devnet
-    try {
-      const publicKey = new PublicKey(user.walletAddress);
-      const balance = await connection.getBalance(publicKey);
-      const solBalance = balance / LAMPORTS_PER_SOL;
-
-      console.log(`💰 Wallet Balance: ${solBalance} SOL`);
-
-      if (fromToken.toUpperCase() === 'SOL' && amount > solBalance) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient balance. You have ${solBalance.toFixed(4)} SOL but trying to swap ${amount} SOL`
-        });
-      }
-    } catch (error) {
-      console.error('Balance check error:', error);
     }
 
     transactionId = nanoid();
 
-    console.log(`🧪 DEVNET: Initiating Swap: ${amount} ${fromToken} → ${toToken}`);
+    console.log(`🔄 Executing REAL swap: ${amount} ${fromToken} → ${toToken}`);
 
-    // Get simulated swap quote
-    const jupiterSwap = await getJupiterDevnetSwapTransaction(
+    // Execute real Jupiter swap
+    const swapResult = await executeJupiterSwap(
       fromTokenMint,
       toTokenMint,
       amount,
-      user.walletAddress
+      keypair,
+      100 // 1% slippage
     );
 
-    const estimatedToAmount = jupiterSwap.outputAmount / 1e9;
-
-    console.log(`✅ Simulated Quote: ${amount} ${fromToken} → ${estimatedToAmount.toFixed(6)} ${toToken}`);
-
-    // Create transaction record
+    // Create transaction record - REMOVED signature field
     const transaction = await prisma.initiatedTransaction.create({
       data: {
         userId: user.id,
@@ -238,59 +227,46 @@ tradeRoute.post("/makeTrade", async (req: Request<{}, {}, TradeBody>, res: Respo
         fromToken: fromToken.toUpperCase(),
         toToken: toToken.toUpperCase(),
         fromAmount: amount,
-        estimatedToAmount: estimatedToAmount,
-        fromTokenPrice: 0, // Set to 0 for devnet testing
+        estimatedToAmount: swapResult.outputAmount,
+        fromTokenPrice: 0,
         toTokenPrice: 0,
         estimatedValueUSD: 0,
-        status: 'COMPLETED', // Mark as completed for testing
-        priceSource: 'devnet-simulation',
+        status: 'COMPLETED',
+        priceSource: 'jupiter-v6',
         ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-        userAgent: req.get('user-agent') || 'unknown'
+        userAgent: req.get('user-agent') || 'unknown',
+        signature: swapResult.signature
       }
     });
 
-    console.log('✅ Transaction saved to DB:', transaction.id);
-
-    // Return success with devnet info
+    // Return success
     return res.status(200).json({
       success: true,
-      message: `🧪 DEVNET: Simulated swap: ${amount} ${fromToken} → ${estimatedToAmount.toFixed(6)} ${toToken}`,
+      message: `✅ Swap completed: ${amount} ${fromToken} → ${swapResult.outputAmount.toFixed(6)} ${toToken}`,
       data: {
-        network: 'devnet',
         transactionId: transaction.transactionId,
+        signature: swapResult.signature,
         fromToken,
         toToken,
         amount,
-        estimatedToAmount: estimatedToAmount.toFixed(6),
-        timestamp: transaction.initiatedAt,
-        quote: jupiterSwap.quote,
-        explorerUrl: `https://explorer.solana.com/address/${user.walletAddress}?cluster=devnet`
+        receivedAmount: swapResult.outputAmount.toFixed(6),
+        explorerUrl: swapResult.explorerUrl,
+        timestamp: transaction.initiatedAt
       }
     });
 
   } catch (error: any) {
     console.error("Trade error:", error);
 
-    // Log the full error
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      console.error("Prisma error code:", error.code);
-      console.error("Prisma error meta:", error.meta);
-    }
-
-    // Update transaction status to failed if transaction was created
     if (transactionId) {
-      try {
-        await prisma.initiatedTransaction.updateMany({
-          where: { transactionId },
-          data: {
-            status: 'FAILED',
-            errorMessage: error.message || 'Unknown error',
-            failedAt: new Date()
-          }
-        });
-      } catch (dbError) {
-        console.error("Failed to update transaction status:", dbError);
-      }
+      await prisma.initiatedTransaction.updateMany({
+        where: { transactionId },
+        data: {
+          status: 'FAILED',
+          errorMessage: error.message || 'Unknown error',
+          failedAt: new Date()
+        }
+      });
     }
 
     return res.status(500).json({
@@ -299,6 +275,167 @@ tradeRoute.post("/makeTrade", async (req: Request<{}, {}, TradeBody>, res: Respo
     });
   }
 });
+
+
+tradeRoute.post("/getTokenAccounts", async (req: Request, res: Response) => {
+  try {
+    const { telegramId } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { telegramId: telegramId.toString() }
+    });
+
+    if (!user || !user.walletAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "Wallet not connected"
+      });
+    }
+
+    const walletPubkey = new PublicKey(user.walletAddress);
+    const tokenAccounts = [];
+
+    // Check each token
+    for (const [symbol, mint] of Object.entries(DEVNET_TOKEN_MINTS)) {
+      if (symbol === 'SOL') continue; // Skip native SOL
+
+      try {
+        const mintPubkey = new PublicKey(mint);
+        const ata = await getAssociatedTokenAddress(mintPubkey, walletPubkey);
+
+        const accountInfo = await connection.getAccountInfo(ata);
+
+        tokenAccounts.push({
+          symbol,
+          mint,
+          tokenAccount: ata.toBase58(),
+          exists: accountInfo !== null,
+          balance: accountInfo ?
+            (await connection.getTokenAccountBalance(ata)).value.uiAmount : 0
+        });
+      } catch (error) {
+        console.error(`Error checking ${symbol}:`, error);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        walletAddress: user.walletAddress,
+        tokenAccounts
+      }
+    });
+
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+
+
+// Simple devnet token transfer (for actual testing)
+async function ensureTokenAccount(
+  walletPubkey: PublicKey,
+  tokenMint: PublicKey,
+  payerKeypair: Keypair // You need this to pay for account creation
+): Promise<string> {
+  try {
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+      tokenMint,
+      walletPubkey
+    );
+
+    // Check if account exists
+    const accountInfo = await connection.getAccountInfo(associatedTokenAddress);
+
+    if (!accountInfo) {
+      console.log('🔨 Creating associated token account...');
+
+      // Create the account
+      const transaction = new Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          payerKeypair.publicKey, // Payer
+          associatedTokenAddress, // Associated token account
+          walletPubkey, // Owner
+          tokenMint // Token mint
+        )
+      );
+
+      const signature = await connection.sendTransaction(
+        transaction,
+        [payerKeypair]
+      );
+
+      await connection.confirmTransaction(signature);
+      console.log('✅ Token account created:', associatedTokenAddress.toBase58());
+    }
+
+    return associatedTokenAddress.toBase58();
+  } catch (error) {
+    console.error('Error ensuring token account:', error);
+    throw error;
+  }
+}
+
+tradeRoute.post("/requestDevnetUSDC", async (req: Request, res: Response) => {
+  try {
+    const { telegramId } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { telegramId: telegramId.toString() }
+    });
+
+    if (!user || !user.walletAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "Wallet not connected"
+      });
+    }
+
+    const walletPubkey = new PublicKey(user.walletAddress);
+    const usdcMint = new PublicKey(DEVNET_TOKEN_MINTS['USDC']!);
+
+    // Get or create USDC token account
+    const usdcTokenAccount = await getAssociatedTokenAddress(
+      usdcMint,
+      walletPubkey
+    );
+
+    // Check if token account exists
+    const accountInfo = await connection.getAccountInfo(usdcTokenAccount);
+
+    if (!accountInfo) {
+      // Need to create it first
+      return res.status(200).json({
+        success: false,
+        message: "USDC token account doesn't exist. You need to create it first or receive USDC from someone who will create it for you.",
+        data: {
+          expectedTokenAccount: usdcTokenAccount.toBase58(),
+          instructions: "Use a devnet faucet or have someone send you USDC"
+        }
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "USDC token account exists",
+      data: {
+        tokenAccount: usdcTokenAccount.toBase58(),
+        instructions: "Request devnet USDC from: https://spl-token-faucet.com/ or use Solana CLI"
+      }
+    });
+
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 
 // routes/tradeRoute.ts
 
@@ -442,6 +579,86 @@ tradeRoute.post("/shareProfit", async (req: Request, res: Response) => {
     });
   }
 });
+
+tradeRoute.post("/getWalletBalances", async (req: Request, res: Response) => {
+  try {
+    const { telegramId } = req.body;
+
+    console.log('here');
+
+
+    if (!telegramId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing telegramId"
+      });
+    }
+
+    // Find user by Telegram ID
+    const user = await prisma.user.findUnique({
+      where: { telegramId: telegramId.toString() }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found. Please use /register or /connectwallet first."
+      });
+    }
+
+    if (!user.walletAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "No wallet connected. Use /connectwallet first."
+      });
+    }
+
+    const publicKey = new PublicKey(user.walletAddress);
+
+    // Get SOL balance
+    const solBalanceLamports = await connection.getBalance(publicKey);
+    const solBalance = (solBalanceLamports / LAMPORTS_PER_SOL).toFixed(4);
+
+    // Get USDC balance (SPL Token)
+    let usdcBalance = "0.0000";
+    try {
+      const usdcMint = new PublicKey(DEVNET_TOKEN_MINTS['USDC']!);
+      const usdcTokenAccount = await getAssociatedTokenAddress(
+        usdcMint,
+        publicKey
+      );
+
+      // Check if token account exists
+      const tokenAccountInfo = await connection.getAccountInfo(usdcTokenAccount);
+
+      if (tokenAccountInfo) {
+        const balance = await connection.getTokenAccountBalance(usdcTokenAccount);
+        usdcBalance = balance.value.uiAmount?.toFixed(4) || "0.0000";
+      }
+    } catch (error) {
+      console.log("USDC account not found or error fetching balance:", error);
+      // USDC balance remains 0 if account doesn't exist
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        walletAddress: user.walletAddress,
+        solBalance,
+        usdcBalance,
+        network: "devnet"
+      }
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching wallet balances:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch wallet balances"
+    });
+  }
+});
+
 
 
 

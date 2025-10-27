@@ -34,10 +34,9 @@ bot.command("help", (ctx) => {
     "💡 **Available Commands:**\n\n" +
     "**Wallet Management:**\n" +
     "/connectwallet - Link your Solana wallet\n" +
-    "/balance <address> - Check SOL balance of any wallet\n" +
+    "/balance - Check SOL balance of any wallet\n" +
     "/mybalance - Check your SOL balance\n" +
-    "/tokens - View all tokens in your wallet\n" +
-    "/checktoken <symbol> - Check specific token balance\n\n" +
+    "/walletbalance - Check SOL and USDC balance\n" + // NEW
     "**Trading (Admin Only):**\n" +
     "/trade - Initiate a token trade\n" +
     "/shareprofit - Share profits among members\n" +
@@ -46,65 +45,9 @@ bot.command("help", (ctx) => {
     "/register - Register yourself in the database\n\n" +
     "**General:**\n" +
     "/help - Show this help message";
-
   ctx.reply(helpMessage, { parse_mode: "Markdown" });
 });
 
-bot.command("connectwallet", async (ctx) => {
-  try {
-    ctx.session ??= {};
-    ctx.session.waitingForWallet = true;
-    await ctx.reply("💬 Please enter your Solana wallet public address:");
-  } catch (err) {
-    console.error("Error in /connectwallet:", err);
-    await ctx.reply("❌ Something went wrong. Try again later.");
-  }
-});
-
-bot.command("tokens", async (ctx) => {
-  try {
-    await ctx.reply("🔍 Fetching your token balances...");
-
-    const telegramId = ctx.from.id;
-
-    const response = await axios.post(
-      `${process.env.BACKEND_URL}/wallet/getTokenBalances`,
-      { telegramId }
-    );
-
-    if (!response.data.success) {
-      return ctx.reply(`⚠️ ${response.data.message}`);
-    }
-
-    const { tokens, walletAddress, network } = response.data.data;
-
-    if (tokens.length === 0) {
-      return ctx.reply("💰 Your wallet has no tokens.");
-    }
-
-    // Format the message
-    let message = `💼 **Your Token Balances**\n`;
-    message += `📍 Network: ${network.toUpperCase()}\n\n`;
-
-    tokens.forEach((token: any, index: number) => {
-      const emoji = getTokenEmoji(token.symbol);
-      message += `${emoji} **${token.symbol}**: ${token.uiAmount}\n`;
-      if (token.name !== 'Unknown Token') {
-        message += `   _${token.name}_\n`;
-      }
-      message += `\n`;
-    });
-
-    message += `\n🔗 [View on Explorer](https://explorer.solana.com/address/${walletAddress}?cluster=${network})`;
-
-    await ctx.reply(message, { parse_mode: "Markdown" });
-
-  } catch (error: any) {
-    console.error("Error in /tokens command:", error);
-    const errorMsg = error.response?.data?.message || "Failed to fetch token balances";
-    await ctx.reply(`❌ ${errorMsg}`);
-  }
-});
 
 // Command to check specific token
 bot.command("checktoken", async (ctx) => {
@@ -147,6 +90,39 @@ bot.command("checktoken", async (ctx) => {
     await ctx.reply(`❌ ${errorMsg}`);
   }
 });
+
+bot.command("walletbalance", async (ctx) => {
+  try {
+    const telegramId = ctx.from.id;
+    
+    await ctx.reply("🔍 Fetching your wallet balances...");
+    
+    const response = await axios.post(
+      `${process.env.BACKEND_URL}/trade/getWalletBalances`,
+      { telegramId }
+    );
+    
+    if (!response.data.success) {
+      return ctx.reply(`⚠️ ${response.data.message}`);
+    }
+    
+    const { solBalance, usdcBalance, walletAddress } = response.data.data;
+    
+    await ctx.reply(
+      `💼 **Your Wallet Balances**\n\n` +
+      `🔗 Wallet: \`${walletAddress}\`\n\n` +
+      `◎ SOL: ${solBalance}\n` +
+      `💵 USDC: ${usdcBalance}\n\n` +
+      `Network: Devnet`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (error: any) {
+    console.error("Error in /walletbalance command:", error);
+    const errorMsg = error.response?.data?.message || "Failed to fetch wallet balances";
+    await ctx.reply(`❌ ${errorMsg}`);
+  }
+});
+
 
 bot.command("sell", async (ctx) => {
   try {

@@ -13,6 +13,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@jup-ag/api": "^6.0.45",
     "@repo/db": "*",
     "@solana/web3.js": "^1.98.4",
     "@types/cors": "^2.8.19",
