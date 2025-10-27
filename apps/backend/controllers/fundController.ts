@@ -1,7 +1,7 @@
 // Create a new fund
 // controllers/fundController.ts
 import { Request, Response, NextFunction } from 'express';
-import { initializeFundOnBlockchain, closeFundOnBlockchain, pauseFundOnBlockchain, resumeFundOnBlockchain } from '../services/solanaService';
+import { initializeFundOnBlockchain, closeFundOnBlockchain, pauseFundOnBlockchain, resumeFundOnBlockchain } from '../services/solanaServices/fundService';
 import { prisma } from '@repo/db';
 // Create a new fund
 export const createFund = async (
@@ -19,6 +19,7 @@ export const createFund = async (
     } = req.body;
 
     // First, check if user exists and has a wallet
+    console.log("")
     const user = await prisma.user.findUnique({
       where: { telegramId }
     });

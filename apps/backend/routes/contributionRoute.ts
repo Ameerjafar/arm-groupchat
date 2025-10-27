@@ -4,11 +4,16 @@ import {
   createContribution,
   getContributionsByFund,
   getContributionsByContributor,
+  getUserFundContribution,
+  getMyShares
 } from '../controllers/contributionController';
 
-const contributionRoute = express.Router();
-contributionRoute.post('/', createContribution);
-contributionRoute.get('/contribution/:fundId', getContributionsByFund);
-contributionRoute.get('/contributor/:contributorId', getContributionsByContributor);
+const router = express.Router();
 
-export default contributionRoute;
+router.post('/', createContribution);
+router.get('/contributions/fund', getContributionsByFund);
+router.get('/contributions/user', getContributionsByContributor);
+router.get('/myshares', getMyShares);
+router.get('/contributions/:groupId', getUserFundContribution);
+
+export default router;
