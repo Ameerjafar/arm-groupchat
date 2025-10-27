@@ -52,7 +52,7 @@ export class ApiService {
   }
 
   async getFundInfo(groupId: string) {
-    return axios.post(`${this.baseUrl}/fund/info`, { groupId });
+    return axios.get(`${this.baseUrl}/fund/info?groupId=${groupId}`);
   }
 
   async getMemberInfo(groupId: string, telegramId: string) {
@@ -61,5 +61,27 @@ export class ApiService {
 
   async createGroup(groupId: string, name: string) {
     return axios.post(`${this.baseUrl}/group/creategroup`, { groupId, name });
+  }
+  async createFund(groupId: string, telegramId: string, fundName: string, minContribution: number, tradingFeeBps: number) {
+    return axios.post(`${this.baseUrl}/fund`, {
+      groupId,
+      telegramId,
+      fundName,
+      minContribution,
+      tradingFeeBps
+    })
+  }
+  async closeFund(groupId: string, telegramId: string) {
+    return axios.post(`${this.baseUrl}/fund/closefund`, {
+      groupId,
+      telegramId
+    })
+  }
+  async updateFundStatus(groupId: string, telegramId: string, status: any) {
+    return axios.put(`${this.baseUrl}/fund/updateFundStatus`, {
+      groupId,
+      telegramId,
+      status
+    })
   }
 }
