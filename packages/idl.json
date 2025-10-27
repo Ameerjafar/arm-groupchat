@@ -69,6 +69,49 @@
       ]
     },
     {
+      "name": "close_fund",
+      "discriminator": [
+        230,
+        183,
+        3,
+        112,
+        236,
+        252,
+        5,
+        185
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund.group_id",
+                "account": "Fund"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "contribute",
       "discriminator": [
         82,
@@ -493,6 +536,21 @@
       "code": 6006,
       "name": "InsufficientShares",
       "msg": "Insufficient shares to withdraw"
+    },
+    {
+      "code": 6007,
+      "name": "UnauthorizedClose",
+      "msg": "Only fund authority can close the fund"
+    },
+    {
+      "code": 6008,
+      "name": "FundNotEmpty",
+      "msg": "Fund must be empty (total_value = 0) before closing"
+    },
+    {
+      "code": 6009,
+      "name": "SharesRemaining",
+      "msg": "All shares must be withdrawn before closing"
     }
   ],
   "types": [

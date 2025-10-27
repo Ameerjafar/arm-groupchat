@@ -28,6 +28,31 @@ pub mod groupchat_fund {
         Ok(())
     }
 
+    // ✅ ADD THIS: Close Fund Function
+    pub fn close_fund(ctx: Context<CloseFund>) -> Result<()> {
+        let fund = &ctx.accounts.fund;
+        
+        // Only authority can close
+        require!(
+            ctx.accounts.authority.key() == fund.authority,
+            ErrorCode::UnauthorizedClose
+        );
+        
+        // Fund must be empty
+        require!(
+            fund.total_value == 0,
+            ErrorCode::FundNotEmpty
+        );
+        
+        require!(
+            fund.total_shares == 0,
+            ErrorCode::SharesRemaining
+        );
+        
+        msg!("Fund closed for group: {}", fund.group_id);
+        Ok(())
+    }
+
     pub fn add_member(
         ctx: Context<AddMember>,
         telegram_id: String,
@@ -259,6 +284,20 @@ pub struct InitializeFund<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// ✅ ADD THIS: CloseFund Accounts
+#[derive(Accounts)]
+pub struct CloseFund<'info> {
+    #[account(
+        mut,
+        close = authority, // Sends rent back to authority
+        seeds = [b"fund", fund.group_id.as_bytes()],
+        bump = fund.bump
+    )]
+    pub fund: Account<'info, Fund>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
 #[derive(Accounts)]
 #[instruction(telegram_id: String)]
 pub struct AddMember<'info> {
@@ -375,4 +414,11 @@ pub enum ErrorCode {
     TradeAlreadySettled,
     #[msg("Insufficient shares to withdraw")]
     InsufficientShares,
+    // ✅ ADD THESE: New error codes for close_fund
+    #[msg("Only fund authority can close the fund")]
+    UnauthorizedClose,
+    #[msg("Fund must be empty (total_value = 0) before closing")]
+    FundNotEmpty,
+    #[msg("All shares must be withdrawn before closing")]
+    SharesRemaining,
 }

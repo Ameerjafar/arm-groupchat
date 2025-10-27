@@ -35,6 +35,9 @@ model Fund {
   initiator            String?
   balance              BigInt         @default(0)
   transactionSignature String?
+  fundName             String
+  minContribution      BigInt
+  tradingFeeBps        Int
   lastSyncedSlot       BigInt?
   status               FundStatus     @default(ACTIVE)
   isRecovered          Boolean        @default(false)
