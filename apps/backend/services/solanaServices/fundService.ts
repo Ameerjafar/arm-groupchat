@@ -1,22 +1,125 @@
+// services/solanaServices/fundService.ts
 import {
   Connection,
   Keypair,
-  Transaction,
   PublicKey,
   SystemProgram,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import idl from "../../../../packages/idl.json";
+import { Program, BN } from "@coral-xyz/anchor";
 import bs58 from "bs58";
 import { prisma } from "@repo/db";
 import { decrypt } from "../utlis";
+import { GroupchatFund } from "../../../../contract/groupchat_fund/target/types/groupchat_fund";
+import IDL from "../../../../contract/groupchat_fund/target/idl/groupchat_fund.json";
 
 const connection = new Connection(
   process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
   "confirmed"
 );
 
+const programId = new PublicKey(
+  process.env.PROGRAM_ID || "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
+);
+
+// ==================== HELPER FUNCTIONS ====================
+
+// Get user keypair from database
+export async function getUserKeypair(telegramId: string): Promise<Keypair | null> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { telegramId },
+      select: {
+        encryptedPrivateKey: true,
+        walletAddress: true,
+      },
+    });
+
+    if (!user || !user.encryptedPrivateKey) {
+      console.error("User not found or no encrypted private key");
+      return null;
+    }
+
+    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
+    const secretKey = bs58.decode(decryptedBase58String);
+
+    if (secretKey.length !== 64) {
+      throw new Error(`Invalid secret key length: ${secretKey.length}`);
+    }
+
+    const keypair = Keypair.fromSecretKey(secretKey);
+
+    if (keypair.publicKey.toString() !== user.walletAddress) {
+      console.error("Decrypted keypair does not match stored wallet address");
+      return null;
+    }
+
+    return keypair;
+  } catch (error) {
+    console.error("Error loading user keypair:", error);
+    return null;
+  }
+}
+
+// Ensure sufficient balance with airdrop
+async function ensureSufficientBalance(keypair: Keypair): Promise<void> {
+  let balance = await connection.getBalance(keypair.publicKey);
+  console.log("Current balance:", balance / LAMPORTS_PER_SOL, "SOL");
+
+  if (balance < 0.5 * LAMPORTS_PER_SOL) {
+    console.log("Requesting airdrop...");
+
+    try {
+      const airdropSignature = await connection.requestAirdrop(
+        keypair.publicKey,
+        2 * LAMPORTS_PER_SOL
+      );
+
+      const latestBlockhash = await connection.getLatestBlockhash();
+      await connection.confirmTransaction(
+        {
+          signature: airdropSignature,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+
+      console.log("✅ Airdrop confirmed!");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      balance = await connection.getBalance(keypair.publicKey);
+      console.log("New balance:", balance / LAMPORTS_PER_SOL, "SOL");
+    } catch (airdropError: any) {
+      console.error("Airdrop failed:", airdropError.message);
+      throw new Error(
+        `Failed to get airdrop. Fund wallet: ${keypair.publicKey.toBase58()}`
+      );
+    }
+  }
+
+  if (balance < 0.1 * LAMPORTS_PER_SOL) {
+    throw new Error(
+      `Insufficient balance: ${balance / LAMPORTS_PER_SOL} SOL. ` +
+      `Fund required: ${keypair.publicKey.toBase58()}`
+    );
+  }
+
+  console.log("✅ Balance sufficient");
+}
+
+// Get program instance
+function getProgram(wallet: anchor.Wallet): Program<GroupchatFund> {
+  const provider = new anchor.AnchorProvider(connection, wallet, {
+    commitment: "confirmed",
+  });
+  return new anchor.Program<GroupchatFund>(IDL as any, provider);
+}
+
+// ==================== FUND OPERATIONS ====================
+
+// Initialize fund on blockchain
 export async function initializeFundOnBlockchain(
   groupId: string,
   fundName: string,
@@ -25,177 +128,82 @@ export async function initializeFundOnBlockchain(
   telegramId: string
 ) {
   try {
-    // Get user
-    console.log("it is working properly");
-    const user = await prisma.user.findUnique({
-      where: { telegramId },
-    });
+    console.log("🔄 Initializing fund on blockchain...");
+    console.log("Group ID:", groupId);
+    console.log("Fund Name:", fundName);
 
-    if (!user) {
-      throw new Error("User not found");
+    const authorityKeypair = await getUserKeypair(telegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
     }
 
-    if (!user.walletAddress || !user.encryptedPrivateKey) {
-      throw new Error("User wallet or private key not found");
-    }
+    console.log("Authority wallet:", authorityKeypair.publicKey.toString());
 
-    console.log("Decrypting private key...");
+    await ensureSufficientBalance(authorityKeypair);
 
-    // Decrypt and restore keypair
-    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
-    const secretKey = bs58.decode(decryptedBase58String);
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
 
-    if (secretKey.length !== 64) {
-      throw new Error(`Invalid secret key length: ${secretKey.length}`);
-    }
-
-    const restoredKeypair = Keypair.fromSecretKey(secretKey);
-
-    console.log("Keypair restored successfully");
-    console.log("Public key:", restoredKeypair.publicKey.toBase58());
-
-    // Check balance
-    let balance = await connection.getBalance(restoredKeypair.publicKey);
-    console.log("Current balance:", balance / LAMPORTS_PER_SOL, "SOL");
-
-    // ✅ FIX: Request airdrop and WAIT for confirmation
-    if (balance < 0.5 * LAMPORTS_PER_SOL) {
-      console.log("Requesting airdrop...");
-
-      try {
-        const airdropSignature = await connection.requestAirdrop(
-          restoredKeypair.publicKey,
-          2 * LAMPORTS_PER_SOL
-        );
-
-        console.log("Airdrop signature:", airdropSignature);
-
-        // ✅ WAIT for airdrop confirmation
-        const latestBlockhash = await connection.getLatestBlockhash();
-        await connection.confirmTransaction(
-          {
-            signature: airdropSignature,
-            blockhash: latestBlockhash.blockhash,
-            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-          },
-          "confirmed"
-        );
-
-        console.log("✅ Airdrop confirmed!");
-
-        // ✅ Wait a bit for balance to update
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // ✅ Check balance again
-        balance = await connection.getBalance(restoredKeypair.publicKey);
-        console.log("New balance:", balance / LAMPORTS_PER_SOL, "SOL");
-
-        if (balance < 0.1 * LAMPORTS_PER_SOL) {
-          throw new Error(
-            `Balance still insufficient: ${balance / LAMPORTS_PER_SOL} SOL. ` +
-            `Please fund manually: ${restoredKeypair.publicKey.toBase58()}`
-          );
-        }
-      } catch (airdropError: any) {
-        console.error("Airdrop failed:", airdropError.message);
-        throw new Error(
-          `Failed to get airdrop. Please fund your wallet:\n` +
-          `Address: ${restoredKeypair.publicKey.toBase58()}\n` +
-          `Use: https://faucet.solana.com`
-        );
-      }
-    }
-
-    // ✅ Verify sufficient balance
-    if (balance < 0.1 * LAMPORTS_PER_SOL) {
-      throw new Error(
-        `Insufficient balance: ${balance / LAMPORTS_PER_SOL} SOL. ` +
-        `Fund required: ${restoredKeypair.publicKey.toBase58()}`
-      );
-    }
-
-    console.log("✅ Balance sufficient, creating fund...");
-
-    // Setup Anchor provider and program
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(restoredKeypair),
-      { commitment: "confirmed" }
-    );
-
-    const program = new anchor.Program(idl as anchor.Idl, provider);
-    const [fundPda] = PublicKey.findProgramAddressSync(
+    // Derive fund PDA
+    const [fundPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("fund"), Buffer.from(groupId)],
       program.programId
     );
 
-    console.log("Fund PDA:", fundPda.toBase58());
+    console.log("Fund PDA:", fundPDA.toString());
 
-    // ✅ Check if fund already exists
+    // Check if fund already exists
     try {
-      const existingFund = await program.account.fund.fetch(fundPda);
-      console.log("⚠️ Fund already exists!");
-      return {
-        fundPdaAddress: fundPda.toBase58(),
-        authority: existingFund.authority.toBase58(),
-        transactionSignature: null,
-        alreadyExists: true,
-      };
-    } catch (error) {
-      // Fund doesn't exist, continue
+      const existingFund = await program.account.fund.fetch(fundPDA);
+      if (existingFund) {
+        console.log("⚠️ Fund already exists!");
+        return {
+          fundPdaAddress: fundPDA.toString(),
+          authority: existingFund.authority.toString(),
+          transactionSignature: null,
+          alreadyExists: true,
+        };
+      }
+    } catch (error: any) {
+      if (!error.message.includes("Account does not exist")) {
+        throw error;
+      }
       console.log("Fund doesn't exist, creating new one");
     }
 
-    // Verify method exists
-    if (!program.methods.initializeFund) {
-      throw new Error("initializeFund method not found in program");
-    }
-
-    // Create and send transaction
-    console.log("Creating transaction...");
+    // Initialize fund - matches Rust signature:
+    // pub fn initialize_fund(
+    //     ctx: Context<InitializeFund>,
+    //     group_id: String,
+    //     fund_name: String,
+    //     min_contribution: u64,
+    //     trading_fee_bps: u16,
+    //     required_approvals: u8,
+    // )
     const tx = await program.methods
       .initializeFund(
-        groupId,
-        fundName,
-        new anchor.BN(minContribution),
-        tradingFeeBps
+        groupId,                    // group_id: String
+        fundName,                   // fund_name: String
+        new BN(minContribution),    // min_contribution: u64
+        tradingFeeBps,              // trading_fee_bps: u16
+        2                           // required_approvals: u8
       )
-      .accounts({
-        fund: fundPda,
-        authority: restoredKeypair.publicKey,
+      .accountsPartial({
+        fund: fundPDA,
+        authority: authorityKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
-      .transaction();
-
-    // Get latest blockhash
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = restoredKeypair.publicKey;
-
-    // Sign transaction
-    tx.sign(restoredKeypair);
-
-    console.log("Sending transaction...");
-
-    // Send and confirm
-    const signature = await connection.sendRawTransaction(tx.serialize());
-    
-    await connection.confirmTransaction(
-      {
-        signature,
-        blockhash,
-        lastValidBlockHeight,
-      },
-      "confirmed"
-    );
+      .signers([authorityKeypair])
+      .rpc();
 
     console.log("✅ Fund created successfully!");
-    console.log("Transaction:", signature);
+    console.log("Transaction:", tx);
 
     return {
-      transactionSignature: signature,
-      fundPdaAddress: fundPda.toBase58(),
-      authority: restoredKeypair.publicKey.toBase58(),
+      success: true,
+      transactionSignature: tx,
+      fundPdaAddress: fundPDA.toString(),
+      authority: authorityKeypair.publicKey.toString(),
       alreadyExists: false,
     };
   } catch (error: any) {
@@ -204,90 +212,72 @@ export async function initializeFundOnBlockchain(
   }
 }
 
-
-// services/solanaService.ts
+// Close fund on blockchain
 export async function closeFundOnBlockchain(
   groupId: string,
   telegramId: string
 ) {
   try {
-    // Get user and decrypt keypair
-    const user = await prisma.user.findUnique({
-      where: { telegramId },
-    });
+    console.log("🔒 Closing fund on blockchain...");
 
-    if (!user?.encryptedPrivateKey) {
-      throw new Error("User wallet not found");
+    const authorityKeypair = await getUserKeypair(telegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
     }
 
-    console.log("Decrypting private key...");
-    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
-    const secretKey = bs58.decode(decryptedBase58String);
-    const keypair = Keypair.fromSecretKey(secretKey);
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
 
-    console.log("Authority:", keypair.publicKey.toBase58());
-
-    // Setup Anchor
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(keypair),
-      { commitment: "confirmed" }
-    );
-
-    const program = new anchor.Program(idl as anchor.Idl, provider);
-
-    // Derive PDA
-    const [fundPda] = PublicKey.findProgramAddressSync(
+    const [fundPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("fund"), Buffer.from(groupId)],
       program.programId
     );
 
-    console.log("Fund PDA:", fundPda.toBase58());
+    console.log("Fund PDA:", fundPDA.toString());
 
     // Check if fund exists and get its data
     let fundAccount;
     try {
-      fundAccount = await program.account.fund.fetch(fundPda);
-      console.log("Fund found:", fundAccount);
+      fundAccount = await program.account.fund.fetch(fundPDA);
+      console.log("Fund found");
     } catch (error) {
       throw new Error("Fund not found on blockchain");
     }
 
     // Verify authority
-    if (fundAccount.authority.toBase58() !== keypair.publicKey.toBase58()) {
+    if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
       throw new Error("Only fund authority can close the fund");
     }
 
     // Check if fund is empty
-    if (fundAccount.totalValue > 0) {
+    if (fundAccount.totalValue.toNumber() > 0) {
       throw new Error(
-        `Fund has balance: ${fundAccount.totalValue}. Must withdraw all funds first.`
+        `Fund has balance: ${fundAccount.totalValue.toNumber() / LAMPORTS_PER_SOL} SOL. ` +
+        `Must withdraw all funds first.`
       );
     }
 
-    if (fundAccount.totalShares > 0) {
+    if (fundAccount.totalShares.toNumber() > 0) {
       throw new Error(
-        `Fund has ${fundAccount.totalShares} shares remaining. All members must withdraw first.`
+        `Fund has ${fundAccount.totalShares.toString()} shares remaining. ` +
+        `All members must withdraw first.`
       );
     }
 
-    // Close the fund
-    console.log("Closing fund on blockchain...");
-    if(!program.methods.closeFund) {
-      console.log("close fund method could not found");
-      return;
-    }
+    // Close fund - matches Rust signature:
+    // pub fn close_fund(ctx: Context<CloseFund>)
     const tx = await program.methods
       .closeFund()
-      .accounts({
-        fund: fundPda,
-        authority: keypair.publicKey,
+      .accountsPartial({
+        fund: fundPDA,
+        authority: authorityKeypair.publicKey,
       })
+      .signers([authorityKeypair])
       .rpc();
 
     console.log("✅ Fund closed successfully on blockchain!");
     console.log("Transaction:", tx);
-    console.log("Rent reclaimed to:", keypair.publicKey.toBase58());
+    console.log("Rent reclaimed to:", authorityKeypair.publicKey.toString());
 
     return {
       success: true,
@@ -295,13 +285,10 @@ export async function closeFundOnBlockchain(
       rentReclaimed: true,
     };
   } catch (error: any) {
-    console.error("Error closing fund on blockchain:", error);
+    console.error("❌ Error closing fund on blockchain:", error.message);
     throw error;
   }
 }
-
-
-// services/solanaService.ts
 
 // Pause fund on blockchain
 export async function pauseFundOnBlockchain(
@@ -309,57 +296,49 @@ export async function pauseFundOnBlockchain(
   telegramId: string
 ) {
   try {
-    const user = await prisma.user.findUnique({
-      where: { telegramId },
-    });
+    console.log("⏸️ Pausing fund on blockchain...");
 
-    if (!user?.encryptedPrivateKey) {
-      throw new Error("User wallet not found");
+    const authorityKeypair = await getUserKeypair(telegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
     }
 
-    console.log("Decrypting private key...");
-    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
-    const secretKey = bs58.decode(decryptedBase58String);
-    const keypair = Keypair.fromSecretKey(secretKey);
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
 
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(keypair),
-      { commitment: "confirmed" }
-    );
-
-    const program = new anchor.Program(idl as anchor.Idl, provider);
-
-    const [fundPda] = PublicKey.findProgramAddressSync(
+    const [fundPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("fund"), Buffer.from(groupId)],
       program.programId
     );
 
-    console.log("Pausing fund on blockchain...");
+    console.log("Fund PDA:", fundPDA.toString());
 
     // Verify fund exists and authority
-    const fundAccount = await program.account.fund.fetch(fundPda);
-    if (fundAccount.authority.toBase58() !== keypair.publicKey.toBase58()) {
+    const fundAccount = await program.account.fund.fetch(fundPDA);
+    if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
       throw new Error("Only fund authority can pause the fund");
     }
 
-    // Call pause_fund instruction
-    if(!program.methods.pauseFund) {
-      console.log("cannot found the method pausefund");
-      return;
-    }
+    // Pause fund - matches Rust signature:
+    // pub fn pause_fund(ctx: Context<PauseFund>)
     const tx = await program.methods
       .pauseFund()
-      .accounts({
-        fund: fundPda,
-        authority: keypair.publicKey,
+      .accountsPartial({
+        fund: fundPDA,
+        authority: authorityKeypair.publicKey,
       })
+      .signers([authorityKeypair])
       .rpc();
 
     console.log("✅ Fund paused on blockchain");
-    return { transactionSignature: tx };
+    console.log("Transaction:", tx);
+
+    return {
+      success: true,
+      transactionSignature: tx,
+    };
   } catch (error: any) {
-    console.error("Error pausing fund:", error);
+    console.error("❌ Error pausing fund:", error.message);
     throw error;
   }
 }
@@ -370,55 +349,152 @@ export async function resumeFundOnBlockchain(
   telegramId: string
 ) {
   try {
-    const user = await prisma.user.findUnique({
-      where: { telegramId },
-    });
+    console.log("▶️ Resuming fund on blockchain...");
 
-    if (!user?.encryptedPrivateKey) {
-      throw new Error("User wallet not found");
+    const authorityKeypair = await getUserKeypair(telegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
     }
 
-    console.log("Decrypting private key...");
-    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
-    const secretKey = bs58.decode(decryptedBase58String);
-    const keypair = Keypair.fromSecretKey(secretKey);
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
 
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(keypair),
-      { commitment: "confirmed" }
-    );
-
-    const program = new anchor.Program(idl as anchor.Idl, provider);
-
-    const [fundPda] = PublicKey.findProgramAddressSync(
+    const [fundPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("fund"), Buffer.from(groupId)],
       program.programId
     );
 
-    console.log("Resuming fund on blockchain...");
+    console.log("Fund PDA:", fundPDA.toString());
 
     // Verify fund exists and authority
-    const fundAccount = await program.account.fund.fetch(fundPda);
-    if (fundAccount.authority.toBase58() !== keypair.publicKey.toBase58()) {
+    const fundAccount = await program.account.fund.fetch(fundPDA);
+    if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
       throw new Error("Only fund authority can resume the fund");
     }
-    if(!program.methods.resumeFund) {
-      console.log("method resume fund is not found");
-      return;
-    }
+
+    // Resume fund - matches Rust signature:
+    // pub fn resume_fund(ctx: Context<ResumeFund>)
     const tx = await program.methods
       .resumeFund()
-      .accounts({
-        fund: fundPda,
-        authority: keypair.publicKey,
+      .accountsPartial({
+        fund: fundPDA,
+        authority: authorityKeypair.publicKey,
       })
+      .signers([authorityKeypair])
       .rpc();
 
     console.log("✅ Fund resumed on blockchain");
-    return { transactionSignature: tx };
+    console.log("Transaction:", tx);
+
+    return {
+      success: true,
+      transactionSignature: tx,
+    };
   } catch (error: any) {
-    console.error("Error resuming fund:", error);
+    console.error("❌ Error resuming fund:", error.message);
+    throw error;
+  }
+}
+
+// Add member to fund
+export async function addMemberToFund(
+  groupId: string,
+  memberTelegramId: string,
+  memberWalletAddress: string
+) {
+  try {
+    console.log("👤 Adding member to fund...");
+
+    const memberKeypair = await getUserKeypair(memberTelegramId);
+    if (!memberKeypair) {
+      throw new Error("Failed to load member keypair");
+    }
+
+    const wallet = new anchor.Wallet(memberKeypair);
+    const program = getProgram(wallet);
+
+    const [fundPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("fund"), Buffer.from(groupId)],
+      program.programId
+    );
+
+    const [memberPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("member"), fundPDA.toBuffer(), memberKeypair.publicKey.toBuffer()],
+      program.programId
+    );
+
+    console.log("Member PDA:", memberPDA.toString());
+
+    // Add member - matches Rust signature:
+    // pub fn add_member(ctx: Context<AddMember>, telegram_id: String)
+    const tx = await program.methods
+      .addMember(memberTelegramId)
+      .accountsPartial({
+        fund: fundPDA,
+        member: memberPDA,
+        memberWallet: memberKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([memberKeypair])
+      .rpc();
+
+    console.log("✅ Member added successfully");
+    console.log("Transaction:", tx);
+
+    return {
+      success: true,
+      transactionSignature: tx,
+      memberPDA: memberPDA.toString(),
+    };
+  } catch (error: any) {
+    console.error("❌ Error adding member:", error.message);
+    throw error;
+  }
+}
+
+// Manage trader (add/remove from approved list)
+export async function manageTrader(
+  groupId: string,
+  authorityTelegramId: string,
+  traderWallet: string,
+  add: boolean
+) {
+  try {
+    console.log(`${add ? "Adding" : "Removing"} trader...`);
+
+    const authorityKeypair = await getUserKeypair(authorityTelegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
+    }
+
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
+
+    const [fundPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("fund"), Buffer.from(groupId)],
+      program.programId
+    );
+
+    // Manage trader - matches Rust signature:
+    // pub fn manage_trader(ctx: Context<ManageTrader>, trader: Pubkey, add: bool)
+    const tx = await program.methods
+      .manageTrader(new PublicKey(traderWallet), add)
+      .accountsPartial({
+        fund: fundPDA,
+        authority: authorityKeypair.publicKey,
+      })
+      .signers([authorityKeypair])
+      .rpc();
+
+    console.log(`✅ Trader ${add ? "added" : "removed"} successfully`);
+    console.log("Transaction:", tx);
+
+    return {
+      success: true,
+      transactionSignature: tx,
+    };
+  } catch (error: any) {
+    console.error("❌ Error managing trader:", error.message);
     throw error;
   }
 }

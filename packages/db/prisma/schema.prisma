@@ -45,6 +45,7 @@ model Fund {
   updatedAt            DateTime       @updatedAt
   contributions        Contribution[]
   transactions         Transaction[]
+  tradeProposals       TradeProposal[]
 
   @@index([groupId])
   @@index([fundPdaAddress])
@@ -55,6 +56,60 @@ enum FundStatus {
   ACTIVE
   CLOSED
   PAUSED
+}
+
+// Trade Proposal Model
+model TradeProposal {
+  id                   String            @id @default(uuid())
+  fundId               String
+  fund                 Fund              @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  proposalId           Int               // On-chain proposal ID
+  proposalPdaAddress   String            @unique
+  proposerTelegramId   String
+  proposerWallet       String
+  fromToken            String            // Token mint address
+  toToken              String            // Token mint address
+  amount               BigInt            // Amount in smallest unit
+  minimumOut           BigInt            // Minimum expected output
+  status               ProposalStatus    @default(PENDING)
+  approvalCount        Int               @default(0)
+  requiredApprovals    Int
+  createdAt            DateTime          @default(now())
+  expiresAt            DateTime
+  executedAt           DateTime?
+  transactionSignature String?           @unique
+  updatedAt            DateTime          @updatedAt
+  approvals            ProposalApproval[]
+
+  @@index([fundId])
+  @@index([proposalId])
+  @@index([status])
+  @@index([proposerTelegramId])
+  @@map("trade_proposals")
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  EXPIRED
+}
+
+// Proposal Approvals
+model ProposalApproval {
+  id                 String        @id @default(uuid())
+  proposalId         String
+  proposal           TradeProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  approverTelegramId String
+  approverWallet     String
+  approvedAt         DateTime      @default(now())
+  transactionSignature String?
+
+  @@unique([proposalId, approverWallet])
+  @@index([proposalId])
+  @@index([approverTelegramId])
+  @@map("proposal_approvals")
 }
 
 // Tracks contributions (for historical record)
@@ -115,6 +170,7 @@ enum TransactionType {
   WITHDRAWAL
   TRADE
   FEE
+  PROPOSAL
 }
 
 enum TxStatus {
