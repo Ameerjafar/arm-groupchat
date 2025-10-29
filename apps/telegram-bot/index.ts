@@ -1,7 +1,6 @@
 import { Telegraf, session } from "telegraf";
 import { MyContext } from "./types/context";
 import { config } from "./config/config";
-import { registerWalletCommands } from "./commands/walletCommands";
 import { registerFundCommands } from "./commands/fundCommands";
 import { registerGeneralCommands } from "./commands/generalCommands";
 import { registerEventHandlers } from "./handlers/eventHandlers";
@@ -17,9 +16,6 @@ bot.use(session());
 
 console.log("📝 Registering commands...");
 
-console.log("  → Registering wallet commands...");
-registerWalletCommands(bot);
-console.log("  ✓ Wallet commands registered");
 
 console.log("  → Registering fund commands...");
 registerFundCommands(bot);
