@@ -1,13 +1,13 @@
 import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
-import { FundService } from "../services/fundService";
-import { WalletService } from "../services/walletService";
-import { ContributionService } from "../services/contributionService";
+import { FundService } from "../api/fundService";
+import { ContributionApiService } from "../api/contributorApi";
+import { ApiService } from "../api/apiService";
 
 export function registerContributorCommands(bot: Telegraf<MyContext>) {
   const fundService = new FundService();
-  const walletService = new WalletService();
-  const contributionService = new ContributionService();
+  const contributionService = new ContributionApiService();
+  const apiService = new ApiService();
 
   // ========== CONTRIBUTE ==========
   bot.command("contribute", async (ctx) => {
@@ -24,12 +24,12 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      // Check wallet
-      const walletCheck = await walletService.checkWallet(userId);
+      // ✅ Check if user has wallet (ran /start)
+      const walletCheck = await apiService.checkUserWallet(userId);
       if (!walletCheck.hasWallet) {
         return ctx.reply(
-          "🔐 You need a wallet first.\n\n" +
-            "Send me /start in private chat to create one.",
+          "❌ You need to create a wallet first!\n\n" +
+            "Send /start to @YourBotName in a private chat to set up your wallet.",
           { parse_mode: "Markdown" }
         );
       }
@@ -78,6 +78,20 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
         return ctx.reply(
           `❌ Minimum is ${minContribution.toFixed(2)} SOL.\n` +
             `You entered ${amount.toFixed(2)} SOL.`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      // ✅ Check user balance
+      const balanceResponse = await apiService.getUserBalance(userId);
+      const userBalance = Number(balanceResponse.data.balance);
+      
+      if (userBalance < amount) {
+        return ctx.reply(
+          `❌ Insufficient balance!\n\n` +
+            `You have: ${userBalance.toFixed(4)} SOL\n` +
+            `Required: ${amount.toFixed(4)} SOL\n\n` +
+            `Please deposit SOL to your wallet first.`,
           { parse_mode: "Markdown" }
         );
       }
@@ -179,6 +193,16 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
+      // ✅ Check wallet exists
+      const walletCheck = await apiService.checkUserWallet(userId);
+      if (!walletCheck.hasWallet) {
+        return ctx.reply(
+          "❌ You need to create a wallet first!\n\n" +
+            "Send /start to the bot in private chat.",
+          { parse_mode: "Markdown" }
+        );
+      }
+
       const response = await contributionService.getUserFundContribution({
         groupId: chatId,
         telegramId: userId,

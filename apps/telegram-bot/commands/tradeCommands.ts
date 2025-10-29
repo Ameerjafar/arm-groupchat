@@ -1,7 +1,7 @@
 import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { TradeApiService } from "../services/tradeApiService";
+import { TradeApiService } from "../api/tradeApi";
 
 // ========== HELPER FUNCTIONS ==========
 
@@ -262,8 +262,6 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       return ctx.reply(`❌ ${error.message}`);
     }
   });
-
-  // ========== TRADE HELP ==========
   bot.command("tradehelp", async (ctx) => {
     ctx.reply(
       `🔰 **Trade Commands**\n\n` +

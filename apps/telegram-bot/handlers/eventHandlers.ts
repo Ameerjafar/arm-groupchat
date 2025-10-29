@@ -1,6 +1,6 @@
 import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
-import { ApiService } from "../services/apiService";
+import { ApiService } from "../api/apiService";
 
 export function registerEventHandlers(bot: Telegraf<MyContext>) {
   const apiService = new ApiService();

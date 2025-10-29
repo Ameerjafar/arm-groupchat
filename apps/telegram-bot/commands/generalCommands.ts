@@ -3,7 +3,6 @@ import { MyContext } from "../types/context";
 import { prisma } from "@repo/db";
 import * as crypto from "crypto";
 
-// Encryption helper functions
 function decrypt(encryptedData: string, encryptionKey: string): string {
   const parts = encryptedData.split(":");
   const iv = Buffer.from(parts[0]!, "hex");
@@ -170,11 +169,7 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
           { parse_mode: "Markdown" }
         );
       }
-
-      // Decrypt private key
       const privateKey = decrypt(user.encryptedPrivateKey, encryptionKey);
-
-      // Send private key with security reminder
       await ctx.editMessageText(
         "✅ **Private Key Exported**\n\n" +
           "Your key is in the next message.\n\n" +
@@ -203,9 +198,7 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
         } catch (err) {
           console.error("Failed to send reminder:", err);
         }
-      }, 60000); // 60 seconds
-
-      // Log export action (optional, for security audit)
+      }, 60000); 
       console.log(`Private key exported by user: ${requestUserId} at ${new Date().toISOString()}`);
 
     } catch (error: any) {

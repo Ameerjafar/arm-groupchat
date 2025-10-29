@@ -1,16 +1,10 @@
 import { Telegraf, Markup } from "telegraf";
 import { MyContext } from "../types/context";
-import { FundService } from "../services/fundService";
-import { WalletService } from "../services/walletService";
+import { FundService } from "../api/fundService";
 import { prisma } from '@repo/db'
-import { config } from "../config/config";
 
 export function registerFundCommands(bot: Telegraf<MyContext>) {
-  const fundService = new FundService();
-  const walletService = new WalletService();
-
-  // ========== HELPER FUNCTIONS ==========
-  
+  const fundService = new FundService();  
   async function checkUserHasStartedBot(ctx: MyContext, userId: string): Promise<boolean> {
     try {
       const user = await prisma.user.findUnique({
@@ -331,7 +325,6 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
   });
 
-  // ========== HELP ==========
   bot.command("fundhelp", async (ctx) => {
     const isGroup = ctx.chat.type !== "private";
     
