@@ -1,4 +1,4 @@
-// services/contributorApiService.ts
+
 import axios from "axios";
 import { config } from "../config/config";
 import { CreateContributionType, GetContributionType, updateMemberType } from "../types/contributionServiceType";
@@ -91,8 +91,6 @@ export class ContributorApiService {
       return false;
     }
   }
-
-  // Get user's total shares in a fund
   async getUserShares(groupId: string, telegramId: string) {
     try {
       const response = await this.getUserFundContribution(groupId, telegramId);

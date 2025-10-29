@@ -1,4 +1,3 @@
-// commands/distributionCommands.ts
 import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
 import { DistributionApiService } from "../services/distribtuionApiService";
@@ -7,21 +6,22 @@ import { prisma } from "@repo/db";
 const distributionApi = new DistributionApiService();
 
 export function registerDistributionCommands(bot: Telegraf<MyContext>) {
+  
+  // ========== MY VALUE ==========
   bot.command("myvalue", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
 
     try {
-      await ctx.reply("🔍 Calculating your current value...");
-
-      // Get user info first
       const user = await prisma.user.findUnique({
         where: { telegramId: userId },
       });
 
-      if (!user || !user.walletAddress) {
-        return ctx.reply("❌ You don't have a wallet. Use /start first.");
+      if (!user?.walletAddress) {
+        return ctx.reply("🔐 Create a wallet first: /start");
       }
+
+      await ctx.reply("⏳ Calculating...");
 
       const response = await distributionApi.calculateDistribution(
         chatId,
@@ -32,42 +32,30 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         return ctx.reply(`❌ ${response.error}`);
       }
 
-      const distInfo = response.data;
-      let statusEmoji = "🟡";
-      if (distInfo.status === "PROFIT") statusEmoji = "🟢";
-      if (distInfo.status === "LOSS") statusEmoji = "🔴";
+      const d = response.data;
+      const statusEmoji = d.status === "PROFIT" ? "📈" : d.status === "LOSS" ? "📉" : "➖";
 
       const message =
-        `${statusEmoji} *Your Fund Value* ${statusEmoji}\n\n` +
-        `*Position:*\n` +
-        `Your Shares: ${distInfo.shares}\n` +
-        `Total Shares: ${distInfo.totalShares}\n` +
-        `Share %: ${distInfo.sharePercentage.toFixed(2)}%\n\n` +
-        `*Value:*\n` +
-        `Initial: ${distInfo.initialContributionSOL.toFixed(4)} SOL\n` +
-        `Current: ${distInfo.currentValueSOL.toFixed(4)} SOL\n` +
-        `${distInfo.status}: ${Math.abs(distInfo.profitOrLossSOL).toFixed(
-          4
-        )} SOL\n\n` +
-        `*Cash-Out Amount:*\n` +
-        `Trading Fee: ${distInfo.tradingFeeSOL.toFixed(4)} SOL\n` +
-        `You'd Receive: *${distInfo.distributionAmountSOL.toFixed(
-          4
-        )} SOL*\n\n` +
-        `Commands:\n` +
-        `• /cashout - Withdraw everything (burns shares)\n` +
-        `• /claimprofits - Claim profits only (keeps shares)`;
+        `${statusEmoji} **Your Position**\n\n` +
+        `**Holdings:**\n` +
+        `${d.shares} shares (${d.sharePercentage.toFixed(2)}%)\n` +
+        `Current value: ${d.currentValueSOL.toFixed(4)} SOL\n` +
+        `Initial: ${d.initialContributionSOL.toFixed(4)} SOL\n\n` +
+        `${statusEmoji} ${d.status}: ${Math.abs(d.profitOrLossSOL).toFixed(4)} SOL\n\n` +
+        `**If you withdraw now:**\n` +
+        `Fee: ${d.tradingFeeSOL.toFixed(4)} SOL\n` +
+        `You get: **${d.distributionAmountSOL.toFixed(4)} SOL**\n\n` +
+        `• /cashout - Exit completely\n` +
+        `• /claimprofits - Take profits only`;
 
       await ctx.reply(message, { parse_mode: "Markdown" });
     } catch (error: any) {
       console.error("Error checking value:", error);
-      await ctx.reply(`❌ Error: ${error.message}`);
+      await ctx.reply(`❌ ${error.message}`);
     }
   });
 
-  /**
-   * Command to cash out completely (burn all shares)
-   */
+  // ========== CASH OUT ==========
   bot.command("cashout", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
@@ -77,11 +65,11 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         where: { telegramId: userId },
       });
 
-      if (!user || !user.walletAddress) {
-        return ctx.reply("❌ You don't have a wallet.");
+      if (!user?.walletAddress) {
+        return ctx.reply("🔐 Create a wallet first: /start");
       }
 
-      // First calculate to show preview
+      // Calculate first
       const calcResponse = await distributionApi.calculateDistribution(
         chatId,
         user.walletAddress
@@ -91,33 +79,26 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         return ctx.reply(`❌ ${calcResponse.error}`);
       }
 
-      const distInfo = calcResponse.data;
+      const d = calcResponse.data;
 
-      if (distInfo.distributionAmountSOL <= 0) {
-        return ctx.reply("❌ No value to cash out.");
+      if (d.distributionAmountSOL <= 0) {
+        return ctx.reply("❌ No value to withdraw.");
       }
 
-      let statusEmoji = distInfo.status === "PROFIT" ? "📈" : "📉";
-      if (distInfo.status === "BREAK-EVEN") statusEmoji = "➖";
+      const statusEmoji = d.status === "PROFIT" ? "📈" : d.status === "LOSS" ? "📉" : "➖";
 
+      // Show confirmation
       await ctx.reply(
-        `${statusEmoji} *Cash Out Summary*\n\n` +
-          `Shares to Burn: ${distInfo.shares}\n` +
-          `Initial: ${distInfo.initialContributionSOL.toFixed(4)} SOL\n` +
-          `Current: ${distInfo.currentValueSOL.toFixed(4)} SOL\n` +
-          `${distInfo.status}: ${Math.abs(distInfo.profitOrLossSOL).toFixed(
-            4
-          )} SOL\n` +
-          `Fee: ${distInfo.tradingFeeSOL.toFixed(4)} SOL\n\n` +
-          `*You'll Receive: ${distInfo.distributionAmountSOL.toFixed(
-            4
-          )} SOL*\n\n` +
-          `⚠️ This will burn all your shares!\n\n` +
+        `⚠️ **Confirm Cash Out**\n\n` +
+          `${d.shares} shares → ${d.distributionAmountSOL.toFixed(4)} SOL\n` +
+          `${statusEmoji} ${d.status}: ${Math.abs(d.profitOrLossSOL).toFixed(4)} SOL\n` +
+          `Fee: ${d.tradingFeeSOL.toFixed(4)} SOL\n\n` +
+          `**This will burn all your shares!**\n\n` +
           `Processing...`,
         { parse_mode: "Markdown" }
       );
 
-      // Execute cash out
+      // Execute
       const response = await distributionApi.cashOut(chatId, userId);
 
       if (!response.success) {
@@ -127,36 +108,28 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
       const result = response.data;
 
       await ctx.reply(
-        `✅ *Cash Out Complete!*\n\n` +
-          `Amount: ${result.distributionAmountSOL.toFixed(4)} SOL\n` +
-          `Result: ${result.status}\n` +
-          `Transaction: \`${result.txSignature}\`\n\n` +
-          `Your shares have been burned. Check your wallet! 💰`,
+        `✅ **Cash Out Complete**\n\n` +
+          `Received: ${result.distributionAmountSOL.toFixed(4)} SOL\n` +
+          `Result: ${result.status}\n\n` +
+          `Your shares have been burned.\n` +
+          `Check your wallet! 💰`,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
-      console.error("Error cashing out:", error);
+      console.error("Cash out error:", error);
 
-      let errorMessage = "❌ Failed to cash out.";
+      let msg = "❌ Withdrawal failed.";
       if (error.response?.data?.error?.includes("Insufficient funds")) {
-        errorMessage = "❌ Fund doesn't have enough balance.";
-      } else if (
-        error.response?.data?.error?.includes("Fund is not active")
-      ) {
-        errorMessage = "❌ Fund is currently paused.";
+        msg = "❌ Fund balance too low.";
+      } else if (error.response?.data?.error?.includes("not active")) {
+        msg = "❌ Fund is paused.";
       }
 
-      await ctx.reply(
-        `${errorMessage}\n\nError: ${
-          error.response?.data?.error || error.message
-        }`
-      );
+      await ctx.reply(`${msg}\n\n${error.response?.data?.error || error.message}`);
     }
   });
 
-  /**
-   * Command to claim profits only (keeps shares)
-   */
+  // ========== CLAIM PROFITS ==========
   bot.command("claimprofits", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
@@ -166,11 +139,11 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         where: { telegramId: userId },
       });
 
-      if (!user || !user.walletAddress) {
-        return ctx.reply("❌ You don't have a wallet.");
+      if (!user?.walletAddress) {
+        return ctx.reply("🔐 Create a wallet first: /start");
       }
 
-      // Calculate profit first
+      // Calculate profit
       const calcResponse = await distributionApi.calculateProfit(
         chatId,
         user.walletAddress
@@ -180,30 +153,25 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         return ctx.reply(`❌ ${calcResponse.error}`);
       }
 
-      const profitInfo = calcResponse.data;
+      const p = calcResponse.data;
 
-      if (profitInfo.netProfitSOL <= 0) {
+      if (p.netProfitSOL <= 0) {
         return ctx.reply(
-          `📊 *No Profits Yet*\n\n` +
-            `Your Shares: ${profitInfo.shares}\n` +
-            `Share %: ${profitInfo.sharePercentage.toFixed(2)}%\n` +
-            `Current Value: ${profitInfo.currentValueSOL.toFixed(4)} SOL\n` +
-            `Initial: ${profitInfo.initialContributionSOL.toFixed(
-              4
-            )} SOL\n\n` +
-            `Keep trading to generate profits! 📈`,
+          `📊 **No Profits Yet**\n\n` +
+            `Shares: ${p.shares} (${p.sharePercentage.toFixed(2)}%)\n` +
+            `Value: ${p.currentValueSOL.toFixed(4)} SOL\n` +
+            `Initial: ${p.initialContributionSOL.toFixed(4)} SOL\n\n` +
+            `Keep growing the fund! 📈`,
           { parse_mode: "Markdown" }
         );
       }
 
       await ctx.reply(
-        `💰 *Profit Claim*\n\n` +
-          `Gross Profit: ${profitInfo.grossProfitSOL.toFixed(4)} SOL\n` +
-          `Fee (${profitInfo.tradingFeeBps} bps): ${profitInfo.feeSOL.toFixed(
-            4
-          )} SOL\n` +
-          `*Net Profit: ${profitInfo.netProfitSOL.toFixed(4)} SOL*\n\n` +
-          `✅ Your shares will remain intact!\n\n` +
+        `💰 **Claim ${p.netProfitSOL.toFixed(4)} SOL?**\n\n` +
+          `Gross profit: ${p.grossProfitSOL.toFixed(4)} SOL\n` +
+          `Fee: ${p.feeSOL.toFixed(4)} SOL\n` +
+          `Net: ${p.netProfitSOL.toFixed(4)} SOL\n\n` +
+          `✅ Your ${p.shares} shares stay invested.\n\n` +
           `Processing...`,
         { parse_mode: "Markdown" }
       );
@@ -218,38 +186,31 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
       const result = response.data;
 
       await ctx.reply(
-        `✅ *Profits Claimed!*\n\n` +
-          `Amount: ${result.netProfitSOL.toFixed(4)} SOL\n` +
-          `Shares Retained: ${profitInfo.shares}\n` +
-          `Transaction: \`${result.txSignature}\`\n\n` +
-          `You're still invested! 🚀`,
+        `✅ **Profits Claimed**\n\n` +
+          `Received: ${result.netProfitSOL.toFixed(4)} SOL\n` +
+          `Shares kept: ${p.shares}\n\n` +
+          `Still invested! 🚀`,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
-      console.error("Error claiming profits:", error);
+      console.error("Claim error:", error);
 
-      let errorMessage = "❌ Failed to claim profits.";
+      let msg = "❌ Claim failed.";
       if (error.response?.data?.error?.includes("No profit")) {
-        errorMessage = "❌ No profits available yet.";
+        msg = "❌ No profits available.";
       }
 
-      await ctx.reply(
-        `${errorMessage}\n\nError: ${
-          error.response?.data?.error || error.message
-        }`
-      );
+      await ctx.reply(`${msg}\n\n${error.response?.data?.error || error.message}`);
     }
   });
 
-  /**
-   * Command for fund authority to cash out all members
-   */
+  // ========== CASH OUT ALL (Admin) ==========
   bot.command("cashoutall", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
 
     try {
-      await ctx.reply("🔄 Starting cash-out for all members...");
+      await ctx.reply("⏳ Processing cash-out for all members...");
 
       const response = await distributionApi.cashOutAll(chatId, userId);
 
@@ -259,68 +220,52 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
 
       const { results, summary } = response.data;
 
-      let totalDistributed = BigInt(0);
+      let totalDist = BigInt(0);
       let totalProfit = BigInt(0);
       let totalLoss = BigInt(0);
 
       for (const r of results) {
         if (r.success && r.distributionAmount) {
-          totalDistributed += BigInt(r.distributionAmount);
+          totalDist += BigInt(r.distributionAmount);
           const pl = BigInt(r.profitOrLoss || "0");
-          if (pl > BigInt(0)) {
-            totalProfit += pl;
-          } else {
-            totalLoss += pl;
-          }
+          if (pl > BigInt(0)) totalProfit += pl;
+          else totalLoss += pl;
         }
       }
 
-      let message = `📊 *Mass Cash-Out Complete*\n\n`;
-      message += `✅ Success: ${summary.successful}\n`;
-      message += `❌ Failed: ${summary.failed}\n\n`;
-      message += `*Total Distributed: ${(Number(totalDistributed) / 1e9).toFixed(
-        4
-      )} SOL*\n`;
-      message += `Total Profit: ${(Number(totalProfit) / 1e9).toFixed(
-        4
-      )} SOL\n`;
-      message += `Total Loss: ${(Math.abs(Number(totalLoss)) / 1e9).toFixed(
-        4
-      )} SOL\n\n`;
-      message += `*Member Details:*\n`;
+      let msg = `✅ **Mass Cash-Out Complete**\n\n`;
+      msg += `Success: ${summary.successful} | Failed: ${summary.failed}\n\n`;
+      msg += `**Total: ${(Number(totalDist) / 1e9).toFixed(4)} SOL**\n`;
+      msg += `Profit: ${(Number(totalProfit) / 1e9).toFixed(4)} SOL\n`;
+      msg += `Loss: ${(Math.abs(Number(totalLoss)) / 1e9).toFixed(4)} SOL\n\n`;
+      msg += `**Top Members:**\n`;
 
-      for (const r of results.slice(0, 10)) {
+      for (const r of results.slice(0, 8)) {
         if (r.success) {
-          const amtSOL = r.distributionAmount
-            ? (Number(r.distributionAmount) / 1e9).toFixed(4)
-            : "0";
-          message += `✅ ${r.telegramId}: ${amtSOL} SOL (${r.status})\n`;
+          const amt = r.distributionAmount ? (Number(r.distributionAmount) / 1e9).toFixed(4) : "0";
+          msg += `✅ User ${r.telegramId.slice(-4)}: ${amt} SOL\n`;
         } else {
-          message += `❌ ${r.telegramId}: ${r.error}\n`;
+          msg += `❌ User ${r.telegramId.slice(-4)}: Failed\n`;
         }
       }
 
-      if (results.length > 10) {
-        message += `\n...and ${results.length - 10} more`;
+      if (results.length > 8) {
+        msg += `\n...${results.length - 8} more`;
       }
 
-      await ctx.reply(message, { parse_mode: "Markdown" });
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     } catch (error: any) {
-      console.error("Error cashing out all:", error);
-      await ctx.reply(
-        `❌ Error: ${error.response?.data?.error || error.message}`
-      );
+      console.error("Mass cash-out error:", error);
+      await ctx.reply(`❌ ${error.response?.data?.error || error.message}`);
     }
   });
 
-  /**
-   * Command to view all members' current values
-   */
+  // ========== ALL VALUES (Admin) ==========
   bot.command("allvalues", async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
     try {
-      await ctx.reply("🔍 Fetching all members' values...");
+      await ctx.reply("⏳ Loading...");
 
       const response = await distributionApi.getAllMembersInfo(chatId);
 
@@ -328,152 +273,122 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
         return ctx.reply(`❌ ${response.error}`);
       }
 
-      const membersInfo = response.data;
+      const members = response.data;
 
-      if (membersInfo.length === 0) {
-        return ctx.reply("📊 No active members found.");
+      if (members.length === 0) {
+        return ctx.reply("📊 No active members.");
       }
 
-      let message = `📊 *All Members' Values*\n\n`;
+      let msg = `📊 **Fund Overview**\n\n`;
 
-      let totalValue = BigInt(0);
+      let totalVal = BigInt(0);
       let totalProfit = BigInt(0);
       let totalLoss = BigInt(0);
 
-      for (const memberInfo of membersInfo) {
-        const distInfo = memberInfo.distributionInfo;
-        totalValue += BigInt(distInfo.distributionAmount);
+      for (const m of members.slice(0, 10)) {
+        const d = m.distributionInfo;
+        totalVal += BigInt(d.distributionAmount);
 
-        let statusEmoji = "🟡";
-        if (distInfo.status === "PROFIT") {
-          statusEmoji = "🟢";
-          totalProfit += BigInt(distInfo.profitOrLoss);
-        } else if (distInfo.status === "LOSS") {
-          statusEmoji = "🔴";
-          totalLoss += BigInt(distInfo.profitOrLoss);
+        let emoji = "➖";
+        if (d.status === "PROFIT") {
+          emoji = "📈";
+          totalProfit += BigInt(d.profitOrLoss);
+        } else if (d.status === "LOSS") {
+          emoji = "📉";
+          totalLoss += BigInt(d.profitOrLoss);
         }
 
-        message += `${statusEmoji} *${memberInfo.telegramId}*\n`;
-        message += `   Shares: ${distInfo.shares} (${distInfo.sharePercentage.toFixed(
-          1
-        )}%)\n`;
-        message += `   Value: ${distInfo.distributionAmountSOL.toFixed(
-          4
-        )} SOL\n`;
-        message += `   ${distInfo.status}: ${Math.abs(
-          distInfo.profitOrLossSOL
-        ).toFixed(4)} SOL\n\n`;
+        msg += `${emoji} User ${m.telegramId.slice(-4)}\n`;
+        msg += `   ${d.shares} shares (${d.sharePercentage.toFixed(1)}%)\n`;
+        msg += `   ${d.distributionAmountSOL.toFixed(4)} SOL\n\n`;
       }
 
-      message += `*Summary:*\n`;
-      message += `Total Value: ${(Number(totalValue) / 1e9).toFixed(4)} SOL\n`;
-      message += `Total Profit: ${(Number(totalProfit) / 1e9).toFixed(
-        4
-      )} SOL\n`;
-      message += `Total Loss: ${(Math.abs(Number(totalLoss)) / 1e9).toFixed(
-        4
-      )} SOL\n\n`;
-      message += `Use /cashoutall to cash everyone out.`;
+      if (members.length > 10) {
+        msg += `_...${members.length - 10} more_\n\n`;
+      }
 
-      await ctx.reply(message, { parse_mode: "Markdown" });
+      msg += `**Total Value: ${(Number(totalVal) / 1e9).toFixed(4)} SOL**\n`;
+      msg += `Profit: ${(Number(totalProfit) / 1e9).toFixed(4)} SOL\n`;
+      msg += `Loss: ${(Math.abs(Number(totalLoss)) / 1e9).toFixed(4)} SOL`;
+
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     } catch (error: any) {
-      console.error("Error fetching all values:", error);
-      await ctx.reply(
-        `❌ Error: ${error.response?.data?.error || error.message}`
-      );
+      console.error("Error fetching values:", error);
+      await ctx.reply(`❌ ${error.response?.data?.error || error.message}`);
     }
   });
 
-  /**
-   * Command to view distribution history
-   */
+  // ========== MY HISTORY ==========
   bot.command("myhistory", async (ctx) => {
     const userId = ctx.from.id.toString();
     const chatId = ctx.chat?.id.toString();
 
     try {
-      await ctx.reply("🔍 Fetching your distribution history...");
-
-      const response = await distributionApi.getDistributionHistory(
-        userId,
-        chatId
-      );
+      const response = await distributionApi.getDistributionHistory(userId, chatId);
 
       if (!response.success) {
         return ctx.reply(`❌ ${response.error}`);
       }
 
-      const distributions = response.data;
+      const dists = response.data;
 
-      if (distributions.length === 0) {
-        return ctx.reply("📊 No distribution history found.");
+      if (dists.length === 0) {
+        return ctx.reply("📊 No withdrawal history.");
       }
 
-      let message = `📊 *Your Distribution History*\n\n`;
+      let msg = `📜 **Your Withdrawals**\n\n`;
 
-      for (const dist of distributions.slice(0, 10)) {
-        const date = new Date(dist.distributedAt).toLocaleDateString();
-        const typeEmoji = dist.type === "FULL_CASHOUT" ? "💰" : "💸";
+      for (const d of dists.slice(0, 8)) {
+        const date = new Date(d.distributedAt).toLocaleDateString();
+        const emoji = d.type === "FULL_CASHOUT" ? "💰" : "💸";
+        const plSign = d.profitOrLossSOL >= 0 ? "+" : "";
 
-        message += `${typeEmoji} *${dist.type}*\n`;
-        message += `   Date: ${date}\n`;
-        message += `   Amount: ${dist.amountSOL.toFixed(4)} SOL\n`;
-        message += `   P/L: ${dist.profitOrLossSOL.toFixed(4)} SOL\n`;
-        message += `   Tx: \`${dist.txSignature.slice(0, 8)}...\`\n\n`;
+        msg += `${emoji} ${d.amountSOL.toFixed(4)} SOL\n`;
+        msg += `   ${date} · ${plSign}${d.profitOrLossSOL.toFixed(4)} SOL\n\n`;
       }
 
-      if (distributions.length > 10) {
-        message += `\n...and ${distributions.length - 10} more`;
+      if (dists.length > 8) {
+        msg += `_...${dists.length - 8} more_`;
       }
 
-      await ctx.reply(message, { parse_mode: "Markdown" });
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     } catch (error: any) {
-      console.error("Error fetching history:", error);
-      await ctx.reply(
-        `❌ Error: ${error.response?.data?.error || error.message}`
-      );
+      console.error("History error:", error);
+      await ctx.reply(`❌ ${error.response?.data?.error || error.message}`);
     }
   });
 
-  /**
-   * Command to view fund distribution statistics
-   */
+  // ========== FUND STATS (Admin) ==========
   bot.command("fundstats", async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
     try {
-      await ctx.reply("🔍 Fetching fund statistics...");
-
       const response = await distributionApi.getFundStats(chatId);
 
       if (!response.success) {
         return ctx.reply(`❌ ${response.error}`);
       }
 
-      const stats = response.data;
+      const s = response.data;
 
-      const message =
-        `📊 *Fund Distribution Statistics*\n\n` +
-        `Total Distributions: ${stats.totalDistributions}\n` +
-        `Total Distributed: ${stats.totalDistributedSOL.toFixed(4)} SOL\n\n` +
-        `*Breakdown:*\n` +
-        `Total Profit: ${stats.totalProfitSOL.toFixed(4)} SOL\n` +
-        `Total Loss: ${stats.totalLossSOL.toFixed(4)} SOL\n\n` +
-        `*Distribution Types:*\n` +
-        `Full Cash-outs: ${stats.cashOutCount}\n` +
-        `Profit Claims: ${stats.profitClaimCount}\n\n` +
-        `Last Distribution: ${
-          stats.lastDistribution
-            ? new Date(stats.lastDistribution).toLocaleString()
-            : "Never"
-        }`;
+      const lastDist = s.lastDistribution
+        ? new Date(s.lastDistribution).toLocaleDateString()
+        : "Never";
 
-      await ctx.reply(message, { parse_mode: "Markdown" });
+      const msg =
+        `📊 **Distribution Stats**\n\n` +
+        `Total: ${s.totalDistributedSOL.toFixed(4)} SOL\n` +
+        `Count: ${s.totalDistributions}\n\n` +
+        `Profit: ${s.totalProfitSOL.toFixed(4)} SOL\n` +
+        `Loss: ${s.totalLossSOL.toFixed(4)} SOL\n\n` +
+        `Cash-outs: ${s.cashOutCount}\n` +
+        `Profit claims: ${s.profitClaimCount}\n\n` +
+        `Last: ${lastDist}`;
+
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     } catch (error: any) {
-      console.error("Error fetching fund stats:", error);
-      await ctx.reply(
-        `❌ Error: ${error.response?.data?.error || error.message}`
-      );
+      console.error("Stats error:", error);
+      await ctx.reply(`❌ ${error.response?.data?.error || error.message}`);
     }
   });
 }
