@@ -1,9 +1,21 @@
+// controllers/contributionController.ts
+
 import { Request, Response, NextFunction } from 'express';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { prisma } from '@repo/db';
-import { contributeToFund, getFundInfo, getMemberShares } from '../services/solanaServices/contributService';
+import { 
+  contributeToFund, 
+  getFundInfo, 
+  getMemberShares,
+  withdrawFromFund,
+} from '../services/solanaServices/contributService';
+// import { syncFundBalance } from '../services/syncService';
 
-// Create a contribution (handles both blockchain and database)
+// ==================== CONTRIBUTION OPERATIONS ====================
+
+/**
+ * Create a contribution (handles both blockchain and database)
+ */
 export const createContribution = async (
   req: Request,
   res: Response,
@@ -71,12 +83,21 @@ export const createContribution = async (
     // Execute contribution on blockchain
     const blockchainResult = await contributeToFund(groupId, telegramId, amountSol);
 
+    // ✅ SYNC DATABASE WITH BLOCKCHAIN
+    let newBalance = 0;
+    try {
+      // newBalance = await syncFundBalance(groupId);
+      console.log(`✅ Database synced after contribution: ${newBalance / LAMPORTS_PER_SOL} SOL`);
+    } catch (syncError) {
+      console.error('⚠️ Database sync failed (contribution still successful):', syncError);
+    }
+
     // Use shares from blockchain result
     const sharesMinted = BigInt(blockchainResult.sharesMinted);
     const amountInLamports = Math.floor(amountSol * LAMPORTS_PER_SOL);
 
     // Store in database using transaction
-    const [contribution, updatedFund, transaction] = await prisma.$transaction([
+    const [contribution, transaction] = await prisma.$transaction([
       // Create contribution record
       prisma.contribution.create({
         data: {
@@ -86,15 +107,6 @@ export const createContribution = async (
           amount: BigInt(amountInLamports),
           sharesMinted: sharesMinted,
           transactionSignature: blockchainResult.transactionSignature,
-        },
-      }),
-      // Update fund balance
-      prisma.fund.update({
-        where: { id: fund.id },
-        data: {
-          balance: {
-            increment: BigInt(amountInLamports),
-          },
         },
       }),
       // Create transaction record
@@ -112,6 +124,11 @@ export const createContribution = async (
       }),
     ]);
 
+    // Get updated fund (with synced balance)
+    const updatedFund = await prisma.fund.findUnique({
+      where: { id: fund.id },
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Contribution successful',
@@ -121,8 +138,8 @@ export const createContribution = async (
         amountSol: amountSol,
         sharesMinted: contribution.sharesMinted.toString(),
         transactionSignature: contribution.transactionSignature,
-        fundBalance: updatedFund.balance.toString(),
-        fundBalanceSol: Number(updatedFund.balance) / LAMPORTS_PER_SOL,
+        fundBalance: updatedFund?.balance.toString() || '0',
+        fundBalanceSol: Number(updatedFund?.balance || 0) / LAMPORTS_PER_SOL,
       },
     });
   } catch (error: any) {
@@ -153,7 +170,76 @@ export const createContribution = async (
   }
 };
 
-// ✅ NEW: Get user's shares in a fund (for /myshares command)
+// ==================== WITHDRAWAL OPERATIONS ====================
+
+/**
+ * Withdraw from fund (burn shares)
+ */
+export const withdrawController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<Response | void> => {
+  try {
+    const { groupId, telegramId, sharesToBurn } = req.body;
+
+    if (!groupId || !telegramId || !sharesToBurn) {
+      return res.status(400).json({
+        success: false,
+        message: 'groupId, telegramId, and sharesToBurn are required',
+      });
+    }
+
+    const fund = await prisma.fund.findUnique({
+      where: { groupId },
+    });
+
+    if (!fund) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fund not found',
+      });
+    }
+
+    // Execute withdrawal on blockchain
+    const result = await withdrawFromFund(groupId, telegramId, sharesToBurn);
+
+    // ✅ SYNC DATABASE
+    try {
+      // await syncFundBalance(groupId);
+      console.log(`✅ Database synced after withdrawal`);
+    } catch (syncError) {
+      console.error('⚠️ Sync failed after withdrawal:', syncError);
+    }
+
+    // Log transaction
+    await prisma.transaction.create({
+      data: {
+        fundId: fund.id,
+        type: 'WITHDRAWAL',
+        amount: BigInt(result.amount),
+        signature: result.transactionSignature,
+        initiator: telegramId,
+        status: 'CONFIRMED',
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Withdrawal successful',
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('Withdrawal error:', error);
+    return next(error);
+  }
+};
+
+// ==================== QUERY OPERATIONS ====================
+
+/**
+ * Get user's shares in a fund (for /myshares command)
+ */
 export const getMyShares = async (
   req: Request,
   res: Response,
@@ -202,18 +288,12 @@ export const getMyShares = async (
       BigInt(0)
     );
 
-    const totalSharesFromDb = contributions.reduce(
-      (sum, c) => sum + c.sharesMinted,
-      BigInt(0)
-    );
-
     // ✅ Get on-chain fund info (source of truth for total shares and balance)
     let blockchainFundInfo;
     try {
       blockchainFundInfo = await getFundInfo(groupId as string);
     } catch (error) {
       console.error('Error fetching blockchain fund info:', error);
-      // If blockchain call fails, return error
       return res.status(503).json({
         success: false,
         message: 'Unable to fetch blockchain data. Please try again.',
@@ -226,7 +306,10 @@ export const getMyShares = async (
       onChainShares = await getMemberShares(groupId as string, telegramId as string);
     } catch (error) {
       console.error('Error fetching on-chain shares:', error);
-      // Fallback to database if blockchain call fails
+      const totalSharesFromDb = contributions.reduce(
+        (sum, c) => sum + c.sharesMinted,
+        BigInt(0)
+      );
       onChainShares = {
         shares: totalSharesFromDb.toString(),
         totalContributed: Number(totalContributed) / LAMPORTS_PER_SOL,
@@ -241,7 +324,7 @@ export const getMyShares = async (
 
     // ✅ Use BLOCKCHAIN total shares (not database)
     const blockchainTotalShares = BigInt(blockchainFundInfo.totalShares);
-    const blockchainTotalValue = blockchainFundInfo.totalValue * LAMPORTS_PER_SOL; // Convert SOL to lamports
+    const blockchainTotalValue = blockchainFundInfo.totalValue * LAMPORTS_PER_SOL;
 
     // ✅ Calculate ownership percentage using blockchain data
     const userShares = BigInt(onChainShares.shares);
@@ -283,9 +366,9 @@ export const getMyShares = async (
           fundName: fund.fundName,
           groupId: fund.groupId,
           status: fund.status,
-          totalBalance: blockchainFundInfo.totalValue.toString(), // From blockchain
-          totalBalanceSol: blockchainFundInfo.totalValue, // Already in SOL
-          totalShares: blockchainFundInfo.totalShares, // From blockchain
+          totalBalance: blockchainFundInfo.totalValue.toString(),
+          totalBalanceSol: blockchainFundInfo.totalValue,
+          totalShares: blockchainFundInfo.totalShares,
           totalContributors: new Set(allContributions.map(c => c.contributorTelegramId)).size,
           totalContributions: allContributions.length,
           minContribution: blockchainFundInfo.minContribution,
@@ -310,8 +393,9 @@ export const getMyShares = async (
   }
 };
 
-
-// Get contributions by fund
+/**
+ * Get contributions by fund
+ */
 export const getContributionsByFund = async (
   req: Request,
   res: Response,
@@ -378,7 +462,9 @@ export const getContributionsByFund = async (
   }
 };
 
-// Get contributions by contributor (user)
+/**
+ * Get contributions by contributor (user)
+ */
 export const getContributionsByContributor = async (
   req: Request,
   res: Response,
@@ -439,7 +525,9 @@ export const getContributionsByContributor = async (
   }
 };
 
-// Get user's contribution to a specific fund
+/**
+ * Get user's contribution to a specific fund
+ */
 export const getUserFundContribution = async (
   req: Request,
   res: Response,

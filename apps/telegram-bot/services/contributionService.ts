@@ -1,4 +1,5 @@
-import { CreateContributionType, GetContributionType, GetUserFundContributionType } from "../types/contributionServiceType";
+// services/contributionService.ts
+import { CreateContributionType, GetContributionType, GetUserFundContributionType, updateMemberType } from "../types/contributionServiceType";
 import { ContributorApiService } from "./contributorApiService";
 
 export class ContributionService {
@@ -63,5 +64,21 @@ export class ContributionService {
   async getUserShares(groupId: string, telegramId: string) {
     const shares = await this.apiService.getUserShares(groupId, telegramId);
     return shares;
+  }
+
+  // ✅ Updated method with correct parameters
+  async updateMemberRole({
+    groupId, 
+    memberTelegramId, 
+    newRole, 
+    authorityTelegramId
+  }: updateMemberType) {
+    const updateMember = await this.apiService.updateMember({
+      groupId, 
+      memberTelegramId, 
+      newRole,
+      authorityTelegramId
+    });
+    return updateMember;
   }
 }

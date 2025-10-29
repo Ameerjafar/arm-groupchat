@@ -69,85 +69,6 @@
       ]
     },
     {
-      "name": "approve_proposal",
-      "discriminator": [
-        136,
-        108,
-        102,
-        85,
-        98,
-        114,
-        7,
-        147
-      ],
-      "accounts": [
-        {
-          "name": "fund"
-        },
-        {
-          "name": "member",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  101,
-                  109,
-                  98,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "fund"
-              },
-              {
-                "kind": "account",
-                "path": "approver"
-              }
-            ]
-          }
-        },
-        {
-          "name": "proposal",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  112,
-                  111,
-                  115,
-                  97,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "fund"
-              },
-              {
-                "kind": "account",
-                "path": "proposal.proposal_id",
-                "account": "TradeProposal"
-              }
-            ]
-          }
-        },
-        {
-          "name": "approver",
-          "signer": true
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "close_fund",
       "discriminator": [
         230,
@@ -252,38 +173,58 @@
       ]
     },
     {
-      "name": "execute_simple_swap",
+      "name": "distribute_profits",
+      "docs": [
+        "✅ FIXED: Distribute only profits to member (original behavior)",
+        "This only allows distribution if there's profit"
+      ],
       "discriminator": [
-        136,
-        196,
-        84,
-        250,
-        65,
-        3,
-        83,
-        123
+        251,
+        124,
+        40,
+        116,
+        101,
+        198,
+        242,
+        144
       ],
       "accounts": [
         {
           "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "proposal",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  112,
-                  114,
-                  111,
-                  112,
-                  111,
-                  115,
-                  97,
-                  108
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund.group_id",
+                "account": "Fund"
+              }
+            ]
+          }
+        },
+        {
+          "name": "member",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
                 ]
               },
               {
@@ -292,34 +233,98 @@
               },
               {
                 "kind": "account",
-                "path": "proposal.proposal_id",
-                "account": "TradeProposal"
+                "path": "member_wallet"
               }
             ]
           }
         },
         {
-          "name": "fund_from_token",
-          "writable": true
+          "name": "member_wallet",
+          "writable": true,
+          "signer": true
         },
         {
-          "name": "fund_to_token",
-          "writable": true
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "distribute_value",
+      "docs": [
+        "✅ FIXED: Distribute current value to member (profit OR loss)",
+        "This distributes the member's proportional share of current fund value",
+        "Trading fee only applied if there's profit"
+      ],
+      "discriminator": [
+        210,
+        230,
+        59,
+        90,
+        86,
+        173,
+        211,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund.group_id",
+                "account": "Fund"
+              }
+            ]
+          }
         },
         {
-          "name": "pool_from_token",
-          "writable": true
+          "name": "member",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund"
+              },
+              {
+                "kind": "account",
+                "path": "member_wallet"
+              }
+            ]
+          }
         },
         {
-          "name": "pool_to_token",
-          "writable": true
+          "name": "member_wallet",
+          "writable": true,
+          "signer": true
         },
         {
-          "name": "pool_authority"
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -338,18 +343,11 @@
       ],
       "accounts": [
         {
-          "name": "fund"
+          "name": "fund",
+          "writable": true
         },
         {
-          "name": "member"
-        },
-        {
-          "name": "trade",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "trader",
+          "name": "authority",
           "writable": true,
           "signer": true
         },
@@ -360,16 +358,74 @@
       ],
       "args": [
         {
-          "name": "trade_description",
-          "type": "string"
+          "name": "from_token",
+          "type": "pubkey"
+        },
+        {
+          "name": "to_token",
+          "type": "pubkey"
         },
         {
           "name": "amount",
           "type": "u64"
         },
         {
-          "name": "expected_outcome",
-          "type": "i64"
+          "name": "minimum_out",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "execute_trade_real",
+      "discriminator": [
+        201,
+        62,
+        128,
+        75,
+        252,
+        108,
+        136,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fund_token_account",
+          "writable": true
+        },
+        {
+          "name": "counterparty_token_account",
+          "writable": true
+        },
+        {
+          "name": "counterparty",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_out",
+          "type": "u64"
         }
       ]
     },
@@ -433,43 +489,6 @@
         {
           "name": "trading_fee_bps",
           "type": "u16"
-        },
-        {
-          "name": "required_approvals",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "manage_trader",
-      "discriminator": [
-        28,
-        142,
-        94,
-        148,
-        252,
-        187,
-        87,
-        210
-      ],
-      "accounts": [
-        {
-          "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "trader",
-          "type": "pubkey"
-        },
-        {
-          "name": "add",
-          "type": "bool"
         }
       ]
     },
@@ -489,161 +508,6 @@
         {
           "name": "fund",
           "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "propose_trade",
-      "discriminator": [
-        90,
-        218,
-        7,
-        166,
-        111,
-        48,
-        29,
-        15
-      ],
-      "accounts": [
-        {
-          "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "member",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  101,
-                  109,
-                  98,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "fund"
-              },
-              {
-                "kind": "account",
-                "path": "proposer"
-              }
-            ]
-          }
-        },
-        {
-          "name": "proposal",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  112,
-                  111,
-                  115,
-                  97,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "fund"
-              },
-              {
-                "kind": "account",
-                "path": "fund.next_proposal_id",
-                "account": "Fund"
-              }
-            ]
-          }
-        },
-        {
-          "name": "proposer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "from_token",
-          "type": "pubkey"
-        },
-        {
-          "name": "to_token",
-          "type": "pubkey"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "minimum_out",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "reject_proposal",
-      "discriminator": [
-        114,
-        162,
-        164,
-        82,
-        191,
-        11,
-        102,
-        25
-      ],
-      "accounts": [
-        {
-          "name": "fund"
-        },
-        {
-          "name": "proposal",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  111,
-                  112,
-                  111,
-                  115,
-                  97,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "fund"
-              },
-              {
-                "kind": "account",
-                "path": "proposal.proposal_id",
-                "account": "TradeProposal"
-              }
-            ]
-          }
         },
         {
           "name": "authority",
@@ -677,108 +541,6 @@
       "args": []
     },
     {
-      "name": "set_approval_threshold",
-      "discriminator": [
-        136,
-        178,
-        240,
-        249,
-        212,
-        42,
-        150,
-        63
-      ],
-      "accounts": [
-        {
-          "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "threshold",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "settle_trade",
-      "discriminator": [
-        252,
-        176,
-        98,
-        248,
-        73,
-        123,
-        8,
-        157
-      ],
-      "accounts": [
-        {
-          "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "trade",
-          "writable": true
-        },
-        {
-          "name": "member",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "actual_pnl",
-          "type": "i64"
-        }
-      ]
-    },
-    {
-      "name": "update_member_role",
-      "discriminator": [
-        252,
-        36,
-        202,
-        222,
-        22,
-        168,
-        39,
-        69
-      ],
-      "accounts": [
-        {
-          "name": "fund"
-        },
-        {
-          "name": "member",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_role",
-          "type": {
-            "defined": {
-              "name": "MemberRole"
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "withdraw",
       "discriminator": [
         183,
@@ -793,11 +555,52 @@
       "accounts": [
         {
           "name": "fund",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund.group_id",
+                "account": "Fund"
+              }
+            ]
+          }
         },
         {
           "name": "member",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "fund"
+              },
+              {
+                "kind": "account",
+                "path": "member_wallet"
+              }
+            ]
+          }
         },
         {
           "name": "member_wallet",
@@ -843,32 +646,6 @@
         17,
         198
       ]
-    },
-    {
-      "name": "Trade",
-      "discriminator": [
-        132,
-        139,
-        123,
-        31,
-        157,
-        196,
-        244,
-        190
-      ]
-    },
-    {
-      "name": "TradeProposal",
-      "discriminator": [
-        89,
-        131,
-        99,
-        60,
-        98,
-        34,
-        235,
-        216
-      ]
     }
   ],
   "errors": [
@@ -890,7 +667,7 @@
     {
       "code": 6003,
       "name": "UnauthorizedTrader",
-      "msg": "Unauthorized to execute trades"
+      "msg": "Only fund authority can execute trades"
     },
     {
       "code": 6004,
@@ -899,73 +676,33 @@
     },
     {
       "code": 6005,
-      "name": "TradeAlreadySettled",
-      "msg": "Trade already settled"
-    },
-    {
-      "code": 6006,
       "name": "InsufficientShares",
       "msg": "Insufficient shares to withdraw"
     },
     {
-      "code": 6007,
+      "code": 6006,
       "name": "UnauthorizedClose",
       "msg": "Only fund authority can close the fund"
     },
     {
-      "code": 6008,
+      "code": 6007,
       "name": "FundNotEmpty",
       "msg": "Fund must be empty (total_value = 0) before closing"
     },
     {
-      "code": 6009,
+      "code": 6008,
       "name": "SharesRemaining",
       "msg": "All shares must be withdrawn before closing"
     },
     {
+      "code": 6009,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
       "code": 6010,
-      "name": "NotApprovedTrader",
-      "msg": "Not an approved trader"
-    },
-    {
-      "code": 6011,
-      "name": "ProposalNotPending",
-      "msg": "Proposal not in pending status"
-    },
-    {
-      "code": 6012,
-      "name": "ProposalExpired",
-      "msg": "Proposal has expired"
-    },
-    {
-      "code": 6013,
-      "name": "CannotApproveSelf",
-      "msg": "Cannot approve your own proposal"
-    },
-    {
-      "code": 6014,
-      "name": "AlreadyApproved",
-      "msg": "Already approved this proposal"
-    },
-    {
-      "code": 6015,
-      "name": "TooManyTraders",
-      "msg": "Maximum traders reached (10)"
-    },
-    {
-      "code": 6016,
-      "name": "TraderAlreadyAdded",
-      "msg": "Trader already in approved list"
-    },
-    {
-      "code": 6017,
-      "name": "InvalidThreshold",
-      "msg": "Invalid approval threshold"
-    },
-    {
-      "code": 6018,
-      "name": "ProposalNotApproved",
-      "msg": "Proposal not approved yet"
+      "name": "NoProfit",
+      "msg": "No profit available to distribute"
     }
   ],
   "types": [
@@ -1009,20 +746,6 @@
           {
             "name": "bump",
             "type": "u8"
-          },
-          {
-            "name": "approved_traders",
-            "type": {
-              "vec": "pubkey"
-            }
-          },
-          {
-            "name": "required_approvals",
-            "type": "u8"
-          },
-          {
-            "name": "next_proposal_id",
-            "type": "u64"
           }
         ]
       }
@@ -1041,14 +764,6 @@
             "type": "string"
           },
           {
-            "name": "role",
-            "type": {
-              "defined": {
-                "name": "MemberRole"
-              }
-            }
-          },
-          {
             "name": "shares",
             "type": "u64"
           },
@@ -1057,158 +772,8 @@
             "type": "u64"
           },
           {
-            "name": "successful_trades",
-            "type": "u32"
-          },
-          {
-            "name": "failed_trades",
-            "type": "u32"
-          },
-          {
-            "name": "reputation_score",
-            "type": "u32"
-          },
-          {
             "name": "is_active",
             "type": "bool"
-          }
-        ]
-      }
-    },
-    {
-      "name": "MemberRole",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Contributor"
-          },
-          {
-            "name": "Trader"
-          },
-          {
-            "name": "Manager"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ProposalStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Pending"
-          },
-          {
-            "name": "Approved"
-          },
-          {
-            "name": "Rejected"
-          },
-          {
-            "name": "Executed"
-          },
-          {
-            "name": "Expired"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Trade",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "trader",
-            "type": "pubkey"
-          },
-          {
-            "name": "description",
-            "type": "string"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "expected_outcome",
-            "type": "i64"
-          },
-          {
-            "name": "actual_pnl",
-            "type": "i64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "is_settled",
-            "type": "bool"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TradeProposal",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "fund",
-            "type": "pubkey"
-          },
-          {
-            "name": "proposer",
-            "type": "pubkey"
-          },
-          {
-            "name": "proposal_id",
-            "type": "u64"
-          },
-          {
-            "name": "from_token",
-            "type": "pubkey"
-          },
-          {
-            "name": "to_token",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "minimum_out",
-            "type": "u64"
-          },
-          {
-            "name": "approvals",
-            "type": {
-              "vec": "pubkey"
-            }
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "ProposalStatus"
-              }
-            }
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }

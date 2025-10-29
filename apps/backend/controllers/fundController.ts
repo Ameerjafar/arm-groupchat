@@ -1,8 +1,50 @@
-// Create a new fund
-// controllers/fundController.ts
 import { Request, Response, NextFunction } from 'express';
 import { initializeFundOnBlockchain, closeFundOnBlockchain, pauseFundOnBlockchain, resumeFundOnBlockchain } from '../services/solanaServices/fundService';
 import { prisma } from '@repo/db';
+import axios from 'axios';
+
+/**
+ * Check if a user is a member of a Telegram group
+ */
+async function isUserInGroup(groupId: string, telegramId: string): Promise<boolean> {
+  try {
+    const botToken = process.env.BOT_TOKEN;
+    
+    if (!botToken) {
+      throw new Error('BOT_TOKEN is not configured');
+    }
+
+    // Use Telegram Bot API to check if user is a member
+    const response = await axios.post(
+      `https://api.telegram.org/bot${botToken}/getChatMember`,
+      {
+        chat_id: groupId,
+        user_id: telegramId,
+      }
+    );
+
+    if (response.data.ok) {
+      const status = response.data.result.status;
+      
+      // User is considered "in group" if they have any of these statuses
+      const validStatuses = ['member', 'administrator', 'creator'];
+      
+      return validStatuses.includes(status);
+    }
+
+    return false;
+  } catch (error: any) {
+    console.error('Error checking group membership:', error.response?.data || error.message);
+    
+    // If the bot is not in the group or doesn't have permissions
+    if (error.response?.data?.error_code === 400) {
+      throw new Error('Bot is not a member of this group or does not have permission to check members');
+    }
+    
+    throw new Error('Failed to verify group membership');
+  }
+}
+
 // Create a new fund
 export const createFund = async (
   req: Request,
@@ -18,8 +60,34 @@ export const createFund = async (
       tradingFeeBps = 100, // 1% default
     } = req.body;
 
-    // First, check if user exists and has a wallet
-    console.log("")
+    // Validate required fields
+    if (!groupId || !fundName || !telegramId) {
+      return res.status(400).json({
+        success: false,
+        message: 'groupId, fundName, and telegramId are required',
+      });
+    }
+
+    // ✅ Check if user is in the group
+    let isInGroup: boolean;
+    try {
+      isInGroup = await isUserInGroup(groupId, telegramId);
+    } catch (membershipError: any) {
+      console.error('Membership check error:', membershipError);
+      return res.status(403).json({
+        success: false,
+        message: membershipError.message || 'Failed to verify group membership',
+      });
+    }
+
+    if (!isInGroup) {
+      return res.status(403).json({
+        success: false,
+        message: 'You must be a member of the group to create a fund',
+      });
+    }
+
+    // Check if user exists and has a wallet
     const user = await prisma.user.findUnique({
       where: { telegramId }
     });
@@ -30,15 +98,22 @@ export const createFund = async (
         message: "User does not exist or wallet not connected" 
       });
     }
+
+    // Check if fund already exists for this group
     const fundExist = await prisma.fund.findUnique({
       where: {
         groupId
       }
-    })
-    if(fundExist) {
-      return res.status(403).json({message: "fund account already exists for this group"});
+    });
+
+    if (fundExist) {
+      return res.status(403).json({
+        success: false,
+        message: "Fund account already exists for this group"
+      });
     }
 
+    // Initialize fund on blockchain
     const blockchainResponse = await initializeFundOnBlockchain(
       groupId,
       fundName,
@@ -46,8 +121,15 @@ export const createFund = async (
       tradingFeeBps,
       telegramId
     );
-    if(!blockchainResponse) return;
-    // Now store the blockchain data in database
+
+    if (!blockchainResponse) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to initialize fund on blockchain',
+      });
+    }
+
+    // Store the blockchain data in database
     const fund = await prisma.fund.create({
       data: {
         groupId,
@@ -58,7 +140,6 @@ export const createFund = async (
         tradingFeeBps,
         fundName,
         transactionSignature: blockchainResponse.transactionSignature,
-        
         balance: BigInt(0), 
         status: 'ACTIVE',
       },
@@ -76,12 +157,15 @@ export const createFund = async (
       },
     });
   } catch (error: any) {
+    console.error('Create fund error:', error);
+    
     if (error.code === 'P2002') {
       return res.status(409).json({
         success: false,
         message: 'Fund already exists for this group',
       });
     }
+    
     return next(error);
   }
 };
@@ -92,7 +176,7 @@ export const checkFundExists = async (
   res: Response,
   next: NextFunction
 ): Promise<Response | void> => {
-    console.log("inside the exist function");
+  console.log("inside the exist function");
   try {
     const { groupId } = req.body;
 
@@ -208,8 +292,6 @@ export const getFundByGroupId = async (
     return next(error);
   }
 };
-
-
 
 // Update fund balance (for sync operations)
 export const updateFundBalance = async (
@@ -364,7 +446,6 @@ export const updateFundStatus = async (
 };
 
 // Delete fund (soft delete by setting status to CLOSED)
-// controllers/fundController.ts
 export const deleteFund = async (
   req: Request,
   res: Response,
@@ -474,3 +555,6 @@ export const deleteFund = async (
     return next(error);
   }
 };
+
+// Export the helper function in case you need it elsewhere
+export { isUserInGroup };

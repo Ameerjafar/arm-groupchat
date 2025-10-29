@@ -1,9 +1,78 @@
+// services/solanaServices/tradeServices.ts
+
 import * as anchor from "@coral-xyz/anchor";
 import { Program, BN } from "@coral-xyz/anchor";
-import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
+import { 
+  Connection,
+  PublicKey, 
+  Keypair, 
+  SystemProgram,
+  LAMPORTS_PER_SOL 
+} from "@solana/web3.js";
 import { GroupchatFund } from "../../../../contract/groupchat_fund/target/types/groupchat_fund";
+import IDL from "../../../../contract/groupchat_fund/target/idl/groupchat_fund.json";
+import { prisma } from "@repo/db";
+import bs58 from "bs58";
+import { decrypt } from "../utlis";
 
-// PDA Helper Functions
+const connection = new Connection(
+  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  "confirmed"
+);
+
+const programId = new PublicKey(
+  process.env.PROGRAM_ID || "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
+);
+
+// ==================== HELPER FUNCTIONS ====================
+
+// Get user keypair from database
+async function getUserKeypair(telegramId: string): Promise<Keypair | null> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { telegramId },
+      select: {
+        encryptedPrivateKey: true,
+        walletAddress: true,
+      },
+    });
+
+    if (!user || !user.encryptedPrivateKey) {
+      console.error("User not found or no encrypted private key");
+      return null;
+    }
+
+    const decryptedBase58String = decrypt(user.encryptedPrivateKey);
+    const secretKey = bs58.decode(decryptedBase58String);
+
+    if (secretKey.length !== 64) {
+      throw new Error(`Invalid secret key length: ${secretKey.length}`);
+    }
+
+    const keypair = Keypair.fromSecretKey(secretKey);
+
+    if (keypair.publicKey.toString() !== user.walletAddress) {
+      console.error("Decrypted keypair does not match stored wallet address");
+      return null;
+    }
+
+    return keypair;
+  } catch (error) {
+    console.error("Error loading user keypair:", error);
+    return null;
+  }
+}
+
+// Get program instance
+function getProgram(wallet: anchor.Wallet): Program<GroupchatFund> {
+  const provider = new anchor.AnchorProvider(connection, wallet, {
+    commitment: "confirmed",
+  });
+  return new Program<GroupchatFund>(IDL as any, provider);
+}
+
+// ==================== PDA HELPER FUNCTIONS ====================
+
 export function getFundPDA(groupId: string, programId: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("fund"), Buffer.from(groupId)],
@@ -22,295 +91,191 @@ export function getMemberPDA(
   );
 }
 
-export function getProposalPDA(
-  fundKey: PublicKey,
-  proposalId: number,
-  programId: PublicKey
-): [PublicKey, number] {
-  const proposalIdBuffer = Buffer.alloc(8);
-  proposalIdBuffer.writeBigUInt64LE(BigInt(proposalId));
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("proposal"), fundKey.toBuffer(), proposalIdBuffer],
-    programId
-  );
-}
+// ==================== TRADE OPERATIONS ====================
 
-// Propose Trade
-export async function proposeTrade(
-  program: Program<GroupchatFund>,
-  proposer: Keypair,
+/**
+ * Execute trade (admin only)
+ */
+export async function executeTrade(
   groupId: string,
-  fromToken: PublicKey,
-  toToken: PublicKey,
-  amount: number,
-  minimumOut: number
+  authorityTelegramId: string,
+  fromToken: string,
+  toToken: string,
+  amount: string,
+  minimumOut: string
 ) {
   try {
-    // Derive PDAs
+    console.log("⚡ Executing trade...");
+    console.log("From:", fromToken);
+    console.log("To:", toToken);
+    console.log("Amount:", amount);
+    console.log("Minimum Out:", minimumOut);
+
+    const authorityKeypair = await getUserKeypair(authorityTelegramId);
+    if (!authorityKeypair) {
+      throw new Error("Failed to load authority keypair");
+    }
+
+    const wallet = new anchor.Wallet(authorityKeypair);
+    const program = getProgram(wallet);
+
     const [fundPDA] = getFundPDA(groupId, program.programId);
-
-    // Fetch fund account to get next_proposal_id
+    
+    console.log("Fund PDA:", fundPDA.toString());
+    console.log("Authority:", authorityKeypair.publicKey.toString());
     const fundAccount = await program.account.fund.fetch(fundPDA);
-    const proposalId = fundAccount.nextProposalId.toNumber();
+    
+    if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
+      throw new Error("Only fund authority (admin) can execute trades");
+    }
 
-    const [proposalPDA] = getProposalPDA(fundPDA, proposalId, program.programId);
+    if (!fundAccount.isActive) {
+      throw new Error("Fund is not active");
+    }
 
-    // Execute instruction using accountsPartial
+    // Check sufficient balance
+    const amountBN = new BN(amount);
+    if (amountBN.gt(fundAccount.totalValue)) {
+      throw new Error(
+        `Insufficient funds. Available: ${fundAccount.totalValue.toNumber() / LAMPORTS_PER_SOL} SOL`
+      );
+    }
+
+    // Execute trade
     const tx = await program.methods
-      .proposeTrade(
-        fromToken,
-        toToken,
-        new BN(amount),
+      .executeTrade(
+        new PublicKey(fromToken),
+        new PublicKey(toToken),
+        amountBN,
         new BN(minimumOut)
       )
       .accountsPartial({
         fund: fundPDA,
-        proposal: proposalPDA,
-        proposer: proposer.publicKey,
+        authority: authorityKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
-      .signers([proposer])
+      .signers([authorityKeypair])
       .rpc();
 
-    console.log("Trade proposal created:", tx);
-    console.log("Proposal ID:", proposalId);
-    
-    return { 
-      success: true,
-      transactionSignature: tx, 
-      proposalId,
-      proposalPDA 
-    };
-  } catch (error) {
-    console.error("Error proposing trade:", error);
-    throw error;
-  }
-}
+    console.log("✅ Trade executed successfully!");
+    console.log("Transaction:", tx);
 
-// Approve Proposal
-export async function approveProposal(
-  program: Program<GroupchatFund>,
-  approver: Keypair,
-  groupId: string,
-  proposalId: number
-) {
-  try {
-    // Derive PDAs
-    const [fundPDA] = getFundPDA(groupId, program.programId);
-    const [proposalPDA] = getProposalPDA(fundPDA, proposalId, program.programId);
-
-    // Execute instruction using accountsPartial
-    const tx = await program.methods
-      .approveProposal()
-      .accountsPartial({
-        fund: fundPDA,
-        proposal: proposalPDA,
-        approver: approver.publicKey,
-      })
-      .signers([approver])
-      .rpc();
-
-    console.log("Proposal approved:", tx);
-    
-    // Fetch updated proposal to check status
-    const proposalAccount = await program.account.tradeProposal.fetch(proposalPDA);
-    
-    return { 
+    return {
       success: true,
       transactionSignature: tx,
-      approvalCount: proposalAccount.approvals.length,
-      status: proposalAccount.status
+      fromToken,
+      toToken,
+      amount,
+      minimumOut,
     };
-  } catch (error) {
-    console.error("Error approving proposal:", error);
+  } catch (error: any) {
+    console.error("❌ Error executing trade:", error.message);
     throw error;
   }
 }
 
-// Helper: Get Proposal Details
-export async function getProposalDetails(
-  program: Program<GroupchatFund>,
+/**
+ * Check if user is the fund authority (can trade)
+ */
+export async function canExecuteTrade(
   groupId: string,
-  proposalId: number
-) {
+  telegramId: string
+): Promise<{ canTrade: boolean; reason?: string }> {
   try {
-    const [fundPDA] = getFundPDA(groupId, program.programId);
-    const [proposalPDA] = getProposalPDA(fundPDA, proposalId, program.programId);
+    const user = await prisma.user.findUnique({
+      where: { telegramId },
+      select: { walletAddress: true },
+    });
+
+    if (!user?.walletAddress) {
+      return { canTrade: false, reason: "User wallet not found" };
+    }
+
+    const userPublicKey = new PublicKey(user.walletAddress);
     
-    const proposal = await program.account.tradeProposal.fetch(proposalPDA);
+    // Create a dummy wallet just for reading
+    const provider = new anchor.AnchorProvider(
+      connection,
+      {} as any,
+      { commitment: "confirmed" }
+    );
+    const program = new Program<GroupchatFund>(IDL as any, provider);
+
+    const [fundPDA] = getFundPDA(groupId, program.programId);
+    const fundAccount = await program.account.fund.fetch(fundPDA);
+
+    // Check if user is the fund authority
+    if (!fundAccount.authority.equals(userPublicKey)) {
+      return { 
+        canTrade: false, 
+        reason: "Only fund authority (admin) can execute trades" 
+      };
+    }
+
+    // Check if fund is active
+    if (!fundAccount.isActive) {
+      return { canTrade: false, reason: "Fund is not active" };
+    }
+
+    // Check if fund has balance
+    if (fundAccount.totalValue.isZero()) {
+      return { canTrade: false, reason: "Fund has no balance" };
+    }
+
+    return { canTrade: true };
+  } catch (error: any) {
+    console.error("Error checking trade permissions:", error.message);
+    return { canTrade: false, reason: "Error checking permissions" };
+  }
+}
+
+/**
+ * Get fund trading info
+ */
+export async function getFundTradingInfo(groupId: string) {
+  try {
+    const provider = new anchor.AnchorProvider(
+      connection,
+      {} as any,
+      { commitment: "confirmed" }
+    );
+    const program = new Program<GroupchatFund>(IDL as any, provider);
+
+    const [fundPDA] = getFundPDA(groupId, program.programId);
+    const fundAccount = await program.account.fund.fetch(fundPDA);
+
+    return {
+      fundPDA: fundPDA.toBase58(),
+      authority: fundAccount.authority.toBase58(),
+      totalValue: fundAccount.totalValue.toNumber() / LAMPORTS_PER_SOL,
+      isActive: fundAccount.isActive,
+      tradingFeeBps: fundAccount.tradingFeeBps,
+    };
+  } catch (error: any) {
+    console.error("Error fetching fund trading info:", error.message);
+    throw error;
+  }
+}
+
+/**
+ * Get trade history (placeholder - implement based on your needs)
+ */
+export async function getTradeHistory(groupId: string, limit: number = 10) {
+  try {
+    // TODO: Implement trade history tracking
+    // Options:
+    // 1. Parse transaction logs for the fund PDA
+    // 2. Store trades in database when executed
+    // 3. Use Solana program logs
+    
+    console.log("Getting trade history for group:", groupId);
     
     return {
-      proposalId: proposal.proposalId.toNumber(),
-      proposer: proposal.proposer,
-      fromToken: proposal.fromToken,
-      toToken: proposal.toToken,
-      amount: proposal.amount.toNumber(),
-      minimumOut: proposal.minimumOut.toNumber(),
-      approvals: proposal.approvals,
-      approvalCount: proposal.approvals.length,
-      status: proposal.status,
-      createdAt: new Date(proposal.createdAt.toNumber() * 1000),
-      expiresAt: new Date(proposal.expiresAt.toNumber() * 1000),
-      isExpired: Date.now() / 1000 > proposal.expiresAt.toNumber()
+      trades: [],
+      message: "Trade history not yet implemented"
     };
-  } catch (error) {
-    console.error("Error fetching proposal details:", error);
-    throw error;
-  }
-}
-
-// Helper: Check if member can propose trades
-export async function canProposeTrade(
-  program: Program<GroupchatFund>,
-  groupId: string,
-  memberWallet: PublicKey
-): Promise<boolean> {
-  try {
-    const [fundPDA] = getFundPDA(groupId, program.programId);
-    const [memberPDA] = getMemberPDA(fundPDA, memberWallet, program.programId);
-
-    const fundAccount = await program.account.fund.fetch(fundPDA);
-    const memberAccount = await program.account.member.fetch(memberPDA);
-
-    // Check if member is Trader or Manager
-    const isTraderOrManager = 
-      Object.keys(memberAccount.role)[0] === "trader" || 
-      Object.keys(memberAccount.role)[0] === "manager";
-
-    // Check if member is in approved traders list
-    const isApprovedTrader = fundAccount.approvedTraders.some(
-      (trader) => trader.equals(memberWallet)
-    );
-
-    return isTraderOrManager && isApprovedTrader && memberAccount.isActive && fundAccount.isActive;
-  } catch (error) {
-    console.error("Error checking trade permissions:", error);
-    return false;
-  }
-}
-
-// Helper: Check if member can approve proposal
-export async function canApproveProposal(
-  program: Program<GroupchatFund>,
-  groupId: string,
-  memberWallet: PublicKey,
-  proposalId: number
-): Promise<{ canApprove: boolean; reason?: string }> {
-  try {
-    const [fundPDA] = getFundPDA(groupId, program.programId);
-    const [memberPDA] = getMemberPDA(fundPDA, memberWallet, program.programId);
-    const [proposalPDA] = getProposalPDA(fundPDA, proposalId, program.programId);
-
-    const fundAccount = await program.account.fund.fetch(fundPDA);
-    const memberAccount = await program.account.member.fetch(memberPDA);
-    const proposalAccount = await program.account.tradeProposal.fetch(proposalPDA);
-
-    // Check role
-    const isTraderOrManager = 
-      Object.keys(memberAccount.role)[0] === "trader" || 
-      Object.keys(memberAccount.role)[0] === "manager";
-    
-    if (!isTraderOrManager) {
-      return { canApprove: false, reason: "Member is not a trader or manager" };
-    }
-
-    // Check if in approved traders list
-    const isApprovedTrader = fundAccount.approvedTraders.some(
-      (trader) => trader.equals(memberWallet)
-    );
-    
-    if (!isApprovedTrader) {
-      return { canApprove: false, reason: "Not an approved trader" };
-    }
-
-    // Check proposal status
-    if (Object.keys(proposalAccount.status)[0] !== "pending") {
-      return { canApprove: false, reason: "Proposal is not pending" };
-    }
-
-    // Check expiration
-    const currentTime = Math.floor(Date.now() / 1000);
-    if (currentTime >= proposalAccount.expiresAt.toNumber()) {
-      return { canApprove: false, reason: "Proposal has expired" };
-    }
-
-    // Check if proposer is trying to approve their own proposal
-    if (proposalAccount.proposer.equals(memberWallet)) {
-      return { canApprove: false, reason: "Cannot approve your own proposal" };
-    }
-
-    // Check if already approved
-    const hasAlreadyApproved = proposalAccount.approvals.some(
-      (approver) => approver.equals(memberWallet)
-    );
-    
-    if (hasAlreadyApproved) {
-      return { canApprove: false, reason: "Already approved this proposal" };
-    }
-
-    return { canApprove: true };
-  } catch (error) {
-    console.error("Error checking approval permissions:", error);
-    return { canApprove: false, reason: "Error checking permissions" };
-  }
-}
-
-// Helper: Get all proposals for a fund
-export async function getAllProposals(
-  program: Program<GroupchatFund>,
-  groupId: string
-) {
-  try {
-    const [fundPDA] = getFundPDA(groupId, program.programId);
-    const fundAccount = await program.account.fund.fetch(fundPDA);
-    
-    const totalProposals = fundAccount.nextProposalId.toNumber();
-    const proposals = [];
-
-    for (let i = 0; i < totalProposals; i++) {
-      try {
-        const proposalDetails = await getProposalDetails(program, groupId, i);
-        proposals.push(proposalDetails);
-      } catch (error) {
-        console.log(`Proposal ${i} not found or closed`);
-      }
-    }
-
-    return proposals;
-  } catch (error) {
-    console.error("Error fetching all proposals:", error);
-    throw error;
-  }
-}
-
-// Helper: Get pending proposals requiring approval
-export async function getPendingProposals(
-  program: Program<GroupchatFund>,
-  groupId: string
-) {
-  try {
-    const allProposals = await getAllProposals(program, groupId);
-    return allProposals.filter(
-      (proposal) => Object.keys(proposal.status)[0] === "pending" && !proposal.isExpired
-    );
-  } catch (error) {
-    console.error("Error fetching pending proposals:", error);
-    throw error;
-  }
-}
-
-// Helper: Get approved proposals ready to execute
-export async function getApprovedProposals(
-  program: Program<GroupchatFund>,
-  groupId: string
-) {
-  try {
-    const allProposals = await getAllProposals(program, groupId);
-    return allProposals.filter(
-      (proposal) => Object.keys(proposal.status)[0] === "approved"
-    );
-  } catch (error) {
-    console.error("Error fetching approved proposals:", error);
+  } catch (error: any) {
+    console.error("Error fetching trade history:", error.message);
     throw error;
   }
 }

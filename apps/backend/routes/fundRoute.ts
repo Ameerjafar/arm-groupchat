@@ -5,7 +5,7 @@ import {
   getFundByGroupId,
   updateFundBalance,
   updateFundStatus,
-  deleteFund,
+  deleteFund
 } from "../controllers/fundController";
 
 const fundRoute = express.Router();
@@ -17,6 +17,7 @@ fundRoute.patch("/updateFundBalance", updateFundBalance);
 fundRoute.put("/updateFundStatus", updateFundStatus);
 fundRoute.post("/closefund", deleteFund);
 // fundRoute.get("/", getAllFunds);  
-fundRoute.get("/:groupId", getFundByGroupId);  
+fundRoute.get("/:groupId", getFundByGroupId); 
+// fundRoute.post("/updateRoleMember", updateRoleMember) 
 
 export default fundRoute;

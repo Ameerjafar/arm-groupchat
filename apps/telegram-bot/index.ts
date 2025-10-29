@@ -8,6 +8,7 @@ import { registerEventHandlers } from "./handlers/eventHandlers";
 import { registerErrorHandlers } from "./middleware/errorMiddleware";
 import { registerContributorCommands } from "./commands/contributeCommands";
 import { registerTradeCommands } from "./commands/tradeCommands";
+import { registerDistributionCommands } from "./commands/distributionCommmands";
 console.log("🔄 Initializing bot...");
 
 const bot = new Telegraf<MyContext>(config.botToken);
@@ -40,8 +41,10 @@ console.log("  → Registering error handlers...");
 registerErrorHandlers(bot);
 console.log("  ✓ Error handlers registered");
 registerTradeCommands(bot);
+registerDistributionCommands(bot);
 console.log("🚀 Launching bot...");
 console.log(bot.botInfo?.username);
+
 bot.launch();
 
 console.log("✅ Bot launch initiated successfully!");
