@@ -5,6 +5,7 @@ import fundRoute from "./fundRoute";
 import contributionRoute from "./contributionRoute";
 import transactionRoute from "./transactionRoute";
 import tradeRoute from "./tradeRoute";
+import distributionRoute from "./distributionRoute";
 export const routes = express.Router();
 
 routes.use("/group", groupRoute);
@@ -18,3 +19,5 @@ routes.use("/contribution", contributionRoute);
 routes.use("/trasaction", transactionRoute);
 
 routes.use('/trade', tradeRoute);
+
+routes.use('/distribution', distributionRoute);

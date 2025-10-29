@@ -16,6 +16,7 @@ model User {
   groupId             String?
   group               Group?   @relation(fields: [groupId], references: [groupId])
   createdAt           DateTime @default(now())
+  distribution        Distribution[] 
   updatedAt           DateTime @updatedAt
 }
 
@@ -45,7 +46,6 @@ model Fund {
   updatedAt            DateTime       @updatedAt
   contributions        Contribution[]
   transactions         Transaction[]
-  tradeProposals       TradeProposal[]
 
   @@index([groupId])
   @@index([fundPdaAddress])
@@ -58,61 +58,6 @@ enum FundStatus {
   PAUSED
 }
 
-// Trade Proposal Model
-model TradeProposal {
-  id                   String            @id @default(uuid())
-  fundId               String
-  fund                 Fund              @relation(fields: [fundId], references: [id], onDelete: Cascade)
-  proposalId           Int               // On-chain proposal ID
-  proposalPdaAddress   String            @unique
-  proposerTelegramId   String
-  proposerWallet       String
-  fromToken            String            // Token mint address
-  toToken              String            // Token mint address
-  amount               BigInt            // Amount in smallest unit
-  minimumOut           BigInt            // Minimum expected output
-  status               ProposalStatus    @default(PENDING)
-  approvalCount        Int               @default(0)
-  requiredApprovals    Int
-  createdAt            DateTime          @default(now())
-  expiresAt            DateTime
-  executedAt           DateTime?
-  transactionSignature String?           @unique
-  updatedAt            DateTime          @updatedAt
-  approvals            ProposalApproval[]
-
-  @@index([fundId])
-  @@index([proposalId])
-  @@index([status])
-  @@index([proposerTelegramId])
-  @@map("trade_proposals")
-}
-
-enum ProposalStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  EXECUTED
-  EXPIRED
-}
-
-// Proposal Approvals
-model ProposalApproval {
-  id                 String        @id @default(uuid())
-  proposalId         String
-  proposal           TradeProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
-  approverTelegramId String
-  approverWallet     String
-  approvedAt         DateTime      @default(now())
-  transactionSignature String?
-
-  @@unique([proposalId, approverWallet])
-  @@index([proposalId])
-  @@index([approverTelegramId])
-  @@map("proposal_approvals")
-}
-
-// Tracks contributions (for historical record)
 model Contribution {
   id                    String   @id @default(uuid())
   fundId                String
@@ -143,11 +88,13 @@ model Transaction {
   status      TxStatus        @default(PENDING)
   slot        BigInt?
   blockTime   DateTime?
+  timestamp   DateTime        @default(now()) 
   createdAt   DateTime        @default(now())
 
   @@index([fundId])
   @@index([signature])
   @@index([type])
+  @@index([timestamp]) 
   @@map("transactions")
 }
 
@@ -165,12 +112,28 @@ model FailedSync {
   @@map("failed_syncs")
 }
 
+model Distribution {
+  id             String   @id @default(cuid())
+  user           User     @relation(fields: [userId], references: [telegramId])
+  userId         String
+  fundId         String
+  type           String   // "FULL_CASHOUT" or "PROFIT_ONLY"
+  amount         String   // Amount distributed in lamports
+  profitOrLoss   String   // Profit or loss in lamports (can be negative)
+  sharesBurned   String   // Shares burned (0 for profit-only)
+  txSignature    String   @unique
+  distributedAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([fundId])
+  @@index([distributedAt])
+}
+
 enum TransactionType {
   CONTRIBUTION
   WITHDRAWAL
   TRADE
   FEE
-  PROPOSAL
 }
 
 enum TxStatus {

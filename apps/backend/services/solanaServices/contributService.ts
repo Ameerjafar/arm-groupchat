@@ -444,10 +444,6 @@ export async function getMemberShares(groupId: string, telegramId: string) {
         memberAccount.totalContributed.toNumber() / LAMPORTS_PER_SOL,
       isActive: memberAccount.isActive,
       wallet: memberAccount.wallet.toBase58(),
-      role: Object.keys(memberAccount.role)[0],
-      successfulTrades: memberAccount.successfulTrades,
-      failedTrades: memberAccount.failedTrades,
-      reputationScore: memberAccount.reputationScore,
       telegramId: memberAccount.telegramId,
     };
   } catch (error: any) {
@@ -481,9 +477,6 @@ export async function getFundInfo(groupId: string) {
       fundName: fundAccount.fundName,
       authority: fundAccount.authority.toBase58(),
       groupId: fundAccount.groupId,
-      approvedTraders: fundAccount.approvedTraders.map((t) => t.toBase58()),
-      requiredApprovals: fundAccount.requiredApprovals,
-      nextProposalId: fundAccount.nextProposalId.toString(),
       bump: fundAccount.bump,
     };
   } catch (error: any) {
@@ -529,83 +522,15 @@ export async function getAllFundMembers(groupId: string) {
         publicKey: member.publicKey.toBase58(),
         wallet: member.account.wallet.toBase58(),
         telegramId: member.account.telegramId,
-        role: Object.keys(member.account.role)[0],
         shares: member.account.shares.toString(),
         shareValue,
         totalContributed:
           member.account.totalContributed.toNumber() / LAMPORTS_PER_SOL,
         isActive: member.account.isActive,
-        successfulTrades: member.account.successfulTrades,
-        failedTrades: member.account.failedTrades,
-        reputationScore: member.account.reputationScore,
       };
     });
   } catch (error: any) {
     console.error("❌ Error in getAllFundMembers:", error.message);
-    throw error;
-  }
-}
-
-/**
- * Update member role (admin only)
- * Matches Rust: pub fn update_member_role(ctx: Context<UpdateMemberRole>, new_role: MemberRole)
- */
-export async function updateMemberRole(
-  groupId: string,
-  authorityTelegramId: string,
-  memberWallet: string,
-  newRole: "Contributor" | "Trader" | "Manager"
-) {
-  try {
-    console.log("🔄 Updating member role...");
-
-    const authorityKeypair = await getUserKeypair(authorityTelegramId);
-    if (!authorityKeypair) {
-      throw new Error("Failed to load authority keypair");
-    }
-
-    const wallet = new anchor.Wallet(authorityKeypair);
-    const program = getProgram(wallet);
-
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
-
-    const memberPubkey = new PublicKey(memberWallet);
-
-    const [memberPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("member"), fundPDA.toBuffer(), memberPubkey.toBuffer()],
-      program.programId
-    );
-
-    // Map role string to enum
-    const roleEnum =
-      newRole === "Contributor"
-        ? { contributor: {} }
-        : newRole === "Trader"
-        ? { trader: {} }
-        : { manager: {} };
-
-    const tx = await program.methods
-      .updateMemberRole(roleEnum)
-      .accountsPartial({
-        fund: fundPDA,
-        member: memberPDA,
-        authority: authorityKeypair.publicKey,
-      })
-      .signers([authorityKeypair])
-      .rpc();
-
-    console.log("✅ Member role updated successfully");
-    console.log("Transaction:", tx);
-
-    return {
-      success: true,
-      transactionSignature: tx,
-    };
-  } catch (error: any) {
-    console.error("❌ Error updating member role:", error.message);
     throw error;
   }
 }

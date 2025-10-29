@@ -1,11 +1,7 @@
 // services/tradeApiService.ts
 import axios, { AxiosInstance } from "axios";
 import { config } from "../config/config";
-import {
-  CreateProposalType,
-  ApproveProposalType,
-  SyncProposalType,
-} from "../types/tradeServiceType";
+import { ExecuteTradeType } from "../types/tradeServiceType";
 
 export class TradeApiService {
   private api: AxiosInstance;
@@ -19,213 +15,90 @@ export class TradeApiService {
     });
   }
 
-  // ==================== TRADER MANAGEMENT ====================
+  // ==================== TRADE EXECUTION ====================
 
-  async addApprovedTrader(data: {
-    groupId: string;
-    telegramId: string;
-    traderWallet: string;
-  }) {
+  /**
+   * Execute trade (admin only)
+   */
+  async executeTrade(data: ExecuteTradeType) {
     try {
-      const response = await this.api.post("/trade/trader/add", data);
+      const response = await this.api.post("/trade/execute", data);
       return response.data;
     } catch (error: any) {
       console.error(
-        "API Error - Add Trader:",
+        "API Error - Execute Trade:",
         error.response?.data || error.message
       );
       throw error;
     }
   }
 
-  async removeApprovedTrader(data: {
-    groupId: string;
-    telegramId: string;
-    traderWallet: string;
-  }) {
+  /**
+   * Check if user can execute trades
+   */
+  async checkTradePermissions(groupId: string, telegramId: string) {
     try {
-      const response = await this.api.post("/trade/trader/remove", data);
+      const response = await this.api.get("/trade/permissions", {
+        params: { groupId, telegramId },
+      });
       return response.data;
     } catch (error: any) {
       console.error(
-        "API Error - Remove Trader:",
+        "API Error - Check Permissions:",
         error.response?.data || error.message
       );
       throw error;
     }
   }
 
-  async getApprovedTraders(groupId: string) {
+  /**
+   * Get fund trading info
+   */
+  async getFundTradingInfo(groupId: string) {
     try {
-      const response = await this.api.get("/trade/traders", {
+      const response = await this.api.get("/trade/info", {
         params: { groupId },
       });
       return response.data;
     } catch (error: any) {
       console.error(
-        "API Error - Get Traders:",
+        "API Error - Get Trading Info:",
         error.response?.data || error.message
       );
       throw error;
     }
   }
 
-  // ==================== PROPOSAL OPERATIONS ====================
-
-  async createProposal(data: CreateProposalType) {
+  /**
+   * Get trade history
+   */
+  async getTradeHistory(groupId: string, limit: number = 10) {
     try {
-      const response = await this.api.post("/trade/proposal", data);
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Create Proposal:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async approveProposal(data: ApproveProposalType) {
-    try {
-      const response = await this.api.post("/trade/proposal/approve", data);
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Approve Proposal:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async getProposals(groupId: string, telegramId: string, status?: string) {
-    try {
-      const response = await this.api.get("/trade/proposals", {
-        params: { groupId, telegramId, status },
+      const response = await this.api.get("/trade/history", {
+        params: { groupId, limit },
       });
       return response.data;
     } catch (error: any) {
       console.error(
-        "API Error - Get Proposals:",
+        "API Error - Get Trade History:",
         error.response?.data || error.message
       );
       throw error;
     }
   }
 
-  async getProposalById(
-    groupId: string,
-    telegramId: string,
-    proposalId: number
-  ) {
+  /**
+   * Get fund statistics
+   */
+  async getFundStatistics(groupId: string) {
     try {
-      const response = await this.api.get("/trade/proposal", {
-        params: { groupId, telegramId, proposalId },
+      const response = await this.api.get("/trade/statistics", {
+        params: { groupId },
       });
       return response.data;
     } catch (error: any) {
       console.error(
-        "API Error - Get Proposal By ID:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async getPendingProposals(groupId: string, telegramId: string) {
-    try {
-      const response = await this.api.get("/trade/proposals/pending", {
-        params: { groupId, telegramId },
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Get Pending Proposals:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async syncProposal(data: SyncProposalType) {
-    try {
-      const response = await this.api.post("/trade/proposal/sync", data);
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Sync Proposal:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async cleanupExpiredProposals(groupId: string, telegramId: string) {
-    try {
-      const response = await this.api.post("/trade/proposals/cleanup", {
-        groupId,
-        telegramId,
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Cleanup Expired:",
-        error.response?.data || error.message
-      );
-      throw error;
-    }
-  }
-
-  async canProposeTrade(
-    groupId: string,
-    telegramId: string
-  ): Promise<boolean> {
-    try {
-      const response = await this.api.get("/trade/can-propose", {
-        params: { groupId, telegramId },
-      });
-      return response.data.canPropose || false;
-    } catch (error: any) {
-      console.error(
-        "API Error - Can Propose Trade:",
-        error.response?.data || error.message
-      );
-      return false;
-    }
-  }
-
-  async canApproveProposal(
-    groupId: string,
-    telegramId: string,
-    proposalId: number
-  ) {
-    try {
-      const response = await this.api.get("/trade/can-approve", {
-        params: { groupId, telegramId, proposalId },
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Can Approve Proposal:",
-        error.response?.data || error.message
-      );
-      return { canApprove: false, reason: "Error checking permissions" };
-    }
-  }
-
-  async getProposalStatus(
-    groupId: string,
-    telegramId: string,
-    proposalId: number
-  ) {
-    try {
-      const response = await this.api.get("/trade/proposal/status", {
-        params: { groupId, telegramId, proposalId },
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error(
-        "API Error - Get Proposal Status:",
+        "API Error - Get Statistics:",
         error.response?.data || error.message
       );
       throw error;

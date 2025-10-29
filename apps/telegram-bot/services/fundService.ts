@@ -33,4 +33,5 @@ export class FundService {
     const response = await this.apiService.updateFundStatus(groupId, telegramId, status);
     return response.data;
   }
+
 }

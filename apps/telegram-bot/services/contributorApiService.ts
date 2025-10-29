@@ -1,6 +1,7 @@
+// services/contributorApiService.ts
 import axios from "axios";
 import { config } from "../config/config";
-import { CreateContributionType, GetContributionType } from "../types/contributionServiceType";
+import { CreateContributionType, GetContributionType, updateMemberType } from "../types/contributionServiceType";
 
 export class ContributorApiService {
   private baseUrl: string;
@@ -8,6 +9,7 @@ export class ContributorApiService {
   constructor() {
     this.baseUrl = config.backendUrl;
   }
+
   async createContribution({
     groupId,
     telegramId,
@@ -28,6 +30,7 @@ export class ContributorApiService {
       );
     }
   }
+
   async getContributionsByFund({
     groupId,
     page = 1,
@@ -47,6 +50,7 @@ export class ContributorApiService {
       );
     }
   }
+
   async getContributionsByUser(telegramId: string) {
     try {
       const response = await axios.get(
@@ -99,6 +103,28 @@ export class ContributorApiService {
       };
     } catch (error: any) {
       throw new Error("Failed to fetch user shares");
+    }
+  }
+
+  // ✅ Updated method with correct parameters matching backend controller
+  async updateMember({
+    groupId, 
+    memberTelegramId, 
+    newRole, 
+    authorityTelegramId
+  }: updateMemberType) {
+    try {
+      const response = await axios.post(`${this.baseUrl}/fund/updateRoleMember`, {
+        groupId,
+        memberTelegramId,
+        newRole,
+        authorityTelegramId
+      });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to update member role"
+      );
     }
   }
 }

@@ -1,4 +1,5 @@
 // services/solanaServices/fundService.ts
+
 import {
   Connection,
   Keypair,
@@ -23,7 +24,42 @@ const programId = new PublicKey(
   process.env.PROGRAM_ID || "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
 );
 
+// ==================== TYPES ====================
+
+type FundInitResult = {
+  fundPdaAddress: string;
+  authority: string;
+  transactionSignature: string | null;
+  alreadyExists: boolean;
+  success?: boolean;
+};
+
+type SetupFundResult = FundInitResult & {
+  memberPDA?: string;
+  setupComplete?: boolean;
+};
+
 // ==================== HELPER FUNCTIONS ====================
+
+// ✅ ADD THIS EXPORT
+export function getFundPDA(groupId: string, programId: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("fund"), Buffer.from(groupId)],
+    programId
+  );
+}
+
+// ✅ ADD THIS EXPORT TOO
+export function getMemberPDA(
+  fundKey: PublicKey,
+  memberWallet: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("member"), fundKey.toBuffer(), memberWallet.toBuffer()],
+    programId
+  );
+}
 
 // Get user keypair from database
 export async function getUserKeypair(telegramId: string): Promise<Keypair | null> {
@@ -119,14 +155,14 @@ function getProgram(wallet: anchor.Wallet): Program<GroupchatFund> {
 
 // ==================== FUND OPERATIONS ====================
 
-// Initialize fund on blockchain
+// Initialize fund on blockchain (SIMPLIFIED)
 export async function initializeFundOnBlockchain(
   groupId: string,
   fundName: string,
   minContribution: number,
   tradingFeeBps: number,
   telegramId: string
-) {
+): Promise<FundInitResult> {
   try {
     console.log("🔄 Initializing fund on blockchain...");
     console.log("Group ID:", groupId);
@@ -144,11 +180,8 @@ export async function initializeFundOnBlockchain(
     const wallet = new anchor.Wallet(authorityKeypair);
     const program = getProgram(wallet);
 
-    // Derive fund PDA
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
+    // Use the exported function
+    const [fundPDA] = getFundPDA(groupId, program.programId);
 
     console.log("Fund PDA:", fundPDA.toString());
 
@@ -171,22 +204,13 @@ export async function initializeFundOnBlockchain(
       console.log("Fund doesn't exist, creating new one");
     }
 
-    // Initialize fund - matches Rust signature:
-    // pub fn initialize_fund(
-    //     ctx: Context<InitializeFund>,
-    //     group_id: String,
-    //     fund_name: String,
-    //     min_contribution: u64,
-    //     trading_fee_bps: u16,
-    //     required_approvals: u8,
-    // )
+    // ✅ SIMPLIFIED: Initialize fund
     const tx = await program.methods
       .initializeFund(
-        groupId,                    // group_id: String
-        fundName,                   // fund_name: String
-        new BN(minContribution),    // min_contribution: u64
-        tradingFeeBps,              // trading_fee_bps: u16
-        2                           // required_approvals: u8
+        groupId,
+        fundName,
+        new BN(minContribution),
+        tradingFeeBps
       )
       .accountsPartial({
         fund: fundPDA,
@@ -228,10 +252,7 @@ export async function closeFundOnBlockchain(
     const wallet = new anchor.Wallet(authorityKeypair);
     const program = getProgram(wallet);
 
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
+    const [fundPDA] = getFundPDA(groupId, program.programId);
 
     console.log("Fund PDA:", fundPDA.toString());
 
@@ -264,8 +285,6 @@ export async function closeFundOnBlockchain(
       );
     }
 
-    // Close fund - matches Rust signature:
-    // pub fn close_fund(ctx: Context<CloseFund>)
     const tx = await program.methods
       .closeFund()
       .accountsPartial({
@@ -277,7 +296,6 @@ export async function closeFundOnBlockchain(
 
     console.log("✅ Fund closed successfully on blockchain!");
     console.log("Transaction:", tx);
-    console.log("Rent reclaimed to:", authorityKeypair.publicKey.toString());
 
     return {
       success: true,
@@ -306,21 +324,13 @@ export async function pauseFundOnBlockchain(
     const wallet = new anchor.Wallet(authorityKeypair);
     const program = getProgram(wallet);
 
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
+    const [fundPDA] = getFundPDA(groupId, program.programId);
 
-    console.log("Fund PDA:", fundPDA.toString());
-
-    // Verify fund exists and authority
     const fundAccount = await program.account.fund.fetch(fundPDA);
     if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
       throw new Error("Only fund authority can pause the fund");
     }
 
-    // Pause fund - matches Rust signature:
-    // pub fn pause_fund(ctx: Context<PauseFund>)
     const tx = await program.methods
       .pauseFund()
       .accountsPartial({
@@ -331,7 +341,6 @@ export async function pauseFundOnBlockchain(
       .rpc();
 
     console.log("✅ Fund paused on blockchain");
-    console.log("Transaction:", tx);
 
     return {
       success: true,
@@ -359,21 +368,13 @@ export async function resumeFundOnBlockchain(
     const wallet = new anchor.Wallet(authorityKeypair);
     const program = getProgram(wallet);
 
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
+    const [fundPDA] = getFundPDA(groupId, program.programId);
 
-    console.log("Fund PDA:", fundPDA.toString());
-
-    // Verify fund exists and authority
     const fundAccount = await program.account.fund.fetch(fundPDA);
     if (fundAccount.authority.toString() !== authorityKeypair.publicKey.toString()) {
       throw new Error("Only fund authority can resume the fund");
     }
 
-    // Resume fund - matches Rust signature:
-    // pub fn resume_fund(ctx: Context<ResumeFund>)
     const tx = await program.methods
       .resumeFund()
       .accountsPartial({
@@ -384,7 +385,6 @@ export async function resumeFundOnBlockchain(
       .rpc();
 
     console.log("✅ Fund resumed on blockchain");
-    console.log("Transaction:", tx);
 
     return {
       success: true,
@@ -413,20 +413,11 @@ export async function addMemberToFund(
     const wallet = new anchor.Wallet(memberKeypair);
     const program = getProgram(wallet);
 
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
-
-    const [memberPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("member"), fundPDA.toBuffer(), memberKeypair.publicKey.toBuffer()],
-      program.programId
-    );
+    const [fundPDA] = getFundPDA(groupId, program.programId);
+    const [memberPDA] = getMemberPDA(fundPDA, memberKeypair.publicKey, program.programId);
 
     console.log("Member PDA:", memberPDA.toString());
 
-    // Add member - matches Rust signature:
-    // pub fn add_member(ctx: Context<AddMember>, telegram_id: String)
     const tx = await program.methods
       .addMember(memberTelegramId)
       .accountsPartial({
@@ -439,7 +430,6 @@ export async function addMemberToFund(
       .rpc();
 
     console.log("✅ Member added successfully");
-    console.log("Transaction:", tx);
 
     return {
       success: true,
@@ -452,15 +442,17 @@ export async function addMemberToFund(
   }
 }
 
-// Manage trader (add/remove from approved list)
-export async function manageTrader(
+// ✅ Execute trade (admin only)
+export async function executeTrade(
   groupId: string,
   authorityTelegramId: string,
-  traderWallet: string,
-  add: boolean
+  fromToken: string,
+  toToken: string,
+  amount: string,
+  minimumOut: string
 ) {
   try {
-    console.log(`${add ? "Adding" : "Removing"} trader...`);
+    console.log("⚡ Executing trade...");
 
     const authorityKeypair = await getUserKeypair(authorityTelegramId);
     if (!authorityKeypair) {
@@ -470,23 +462,24 @@ export async function manageTrader(
     const wallet = new anchor.Wallet(authorityKeypair);
     const program = getProgram(wallet);
 
-    const [fundPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("fund"), Buffer.from(groupId)],
-      program.programId
-    );
+    const [fundPDA] = getFundPDA(groupId, program.programId);
 
-    // Manage trader - matches Rust signature:
-    // pub fn manage_trader(ctx: Context<ManageTrader>, trader: Pubkey, add: bool)
     const tx = await program.methods
-      .manageTrader(new PublicKey(traderWallet), add)
+      .executeTrade(
+        new PublicKey(fromToken),
+        new PublicKey(toToken),
+        new BN(amount),
+        new BN(minimumOut)
+      )
       .accountsPartial({
         fund: fundPDA,
         authority: authorityKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
       })
       .signers([authorityKeypair])
       .rpc();
 
-    console.log(`✅ Trader ${add ? "added" : "removed"} successfully`);
+    console.log("✅ Trade executed successfully!");
     console.log("Transaction:", tx);
 
     return {
@@ -494,7 +487,58 @@ export async function manageTrader(
       transactionSignature: tx,
     };
   } catch (error: any) {
-    console.error("❌ Error managing trader:", error.message);
+    console.error("❌ Error executing trade:", error.message);
+    throw error;
+  }
+}
+
+// ✅ Setup fund (admin only, no trader setup needed)
+export async function setupFund(
+  groupId: string,
+  fundName: string,
+  minContribution: number,
+  tradingFeeBps: number,
+  creatorTelegramId: string
+): Promise<SetupFundResult> {
+  try {
+    console.log("🚀 Setting up fund...");
+
+    // Step 1: Initialize the fund
+    const fundResult = await initializeFundOnBlockchain(
+      groupId,
+      fundName,
+      minContribution,
+      tradingFeeBps,
+      creatorTelegramId
+    );
+
+    if (fundResult.alreadyExists) {
+      console.log("Fund already exists");
+      return fundResult;
+    }
+
+    console.log("✅ Fund initialized");
+
+    // Small delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Step 2: Add the creator as a member
+    const memberResult = await addMemberToFund(
+      groupId,
+      creatorTelegramId,
+      fundResult.authority
+    );
+
+    console.log("✅ Creator added as member");
+    console.log("🎉 Fund setup complete! Admin can now trade.");
+
+    return {
+      ...fundResult,
+      memberPDA: memberResult.memberPDA,
+      setupComplete: true,
+    };
+  } catch (error: any) {
+    console.error("❌ Error in fund setup:", error.message);
     throw error;
   }
 }

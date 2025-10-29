@@ -2,11 +2,83 @@ import { Telegraf, Markup } from "telegraf";
 import { MyContext } from "../types/context";
 import { FundService } from "../services/fundService";
 import { WalletService } from "../services/walletService";
+import { prisma } from '@repo/db'
 import { config } from "../config/config";
 
 export function registerFundCommands(bot: Telegraf<MyContext>) {
   const fundService = new FundService();
   const walletService = new WalletService();
+
+  /**
+   * Helper function to check if user has started the bot
+   */
+  async function checkUserHasStartedBot(ctx: MyContext, userId: string): Promise<boolean> {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { telegramId: userId },
+      });
+
+      if (!user) {
+        await ctx.reply(
+          "⚠️ **Get Started First!**\n\n" +
+            "Before using fund commands, you need to:\n\n" +
+            "1️⃣ Start a private chat with the bot\n" +
+            "2️⃣ Click the link below or search for the bot\n" +
+            "3️⃣ Send `/start` to create your wallet\n" +
+            "4️⃣ Come back here and try again!\n\n" +
+            `👉 [Click here to start](https://t.me/${ctx.botInfo?.username}?start=setup)`,
+          { parse_mode: "Markdown" }
+        );
+        return false;
+      }
+
+      if (!user.walletAddress) {
+        await ctx.reply(
+          "⚠️ **Wallet Not Setup!**\n\n" +
+            "Your wallet hasn't been created yet.\n\n" +
+            "Please:\n" +
+            "1️⃣ Open a private chat with the bot\n" +
+            "2️⃣ Send `/start` to create your wallet\n" +
+            "3️⃣ Come back and try again!\n\n" +
+            `👉 [Start the bot](https://t.me/${ctx.botInfo?.username}?start=wallet)`,
+          { parse_mode: "Markdown" }
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Error checking user status:", error);
+      await ctx.reply(
+        "❌ An error occurred. Please try again later.",
+        { parse_mode: "Markdown" }
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Helper to check admin permissions
+   */
+  async function checkIsAdmin(ctx: MyContext, userId: string): Promise<boolean> {
+    try {
+      const member = await ctx.getChatMember(parseInt(userId));
+      if (member.status !== "creator" && member.status !== "administrator") {
+        await ctx.reply(
+          "🚫 **Admin Only**\n\n" +
+            "Only group admins can use this command.\n" +
+            "Ask an admin to run this command.",
+          { parse_mode: "Markdown" }
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      await ctx.reply("❌ Could not verify permissions. Please try again.");
+      return false;
+    }
+  }
 
   // INIT FUND Command
   bot.command("initfund", async (ctx) => {
@@ -22,16 +94,15 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      const member = await ctx.getChatMember(parseInt(userId));
-      if (member.status !== "creator" && member.status !== "administrator") {
-        return ctx.reply(
-          "🚫 **Admin Only**\n\n" +
-            "Only group admins can initialize a fund.\n" +
-            "Ask an admin to run this command.",
-          { parse_mode: "Markdown" }
-        );
-      }
+      // Check if user has started bot first
+      const hasStarted = await checkUserHasStartedBot(ctx, userId);
+      if (!hasStarted) return;
 
+      // Check admin permissions
+      const isAdmin = await checkIsAdmin(ctx, userId);
+      if (!isAdmin) return;
+
+      // Check if fund already exists
       const fundExists = await fundService.checkFundExists(chatId);
 
       if (fundExists) {
@@ -45,7 +116,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
 
       const loadingMsg = await ctx.reply(
         "⏳ **Creating Fund...**\n\n" +
-          "Please wait while we set up your custodial fund wallet...",
+          "Please wait while we set up your group fund...",
         { parse_mode: "Markdown" }
       );
 
@@ -66,15 +137,37 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
           `🔐 Wallet: \`${fundData.fundPdaAddress}\`\n` +
           `💵 Min Contribution: ${(fundData.minContribution / 1e9).toFixed(2)} SOL\n` +
           `📊 Trading Fee: ${fundData.tradingFeeBps / 100}%\n\n` +
-          "⚙️ Use /fundsettings to customize fund parameters.\n" +
-          "💰 Members can now use /contribute to join!",
+          "💰 Members can now use /contribute to join!\n\n" +
+          "⚠️ **Note:** Members must start the bot first!\n" +
+          `Send them: @${ctx.botInfo?.username}`,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
       console.error("Error in /initfund:", error);
+      
+      // Handle specific error cases
+      if (error.response?.status === 403) {
+        const message = error.response?.data?.message || "";
+        if (message.includes("member of the group")) {
+          return ctx.reply(
+            "❌ **Not a Group Member**\n\n" +
+              "You must be a member of this group to create a fund.",
+            { parse_mode: "Markdown" }
+          );
+        } else if (message.includes("Bot is not a member")) {
+          return ctx.reply(
+            "❌ **Bot Configuration Error**\n\n" +
+              "The bot needs to be added to this group with proper permissions.\n" +
+              "Please add the bot as an admin.",
+            { parse_mode: "Markdown" }
+          );
+        }
+      }
+      
       ctx.reply(
         "❌ **Could not initialize fund**\n\n" +
-          "Please try again or contact support if the issue continues.",
+          "Please try again or contact support if the issue continues.\n\n" +
+          `Error: ${error.response?.data?.message || error.message}`,
         { parse_mode: "Markdown" }
       );
     }
@@ -93,15 +186,13 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      // Check if user is admin
-      const member = await ctx.getChatMember(parseInt(userId));
-      if (member.status !== "creator" && member.status !== "administrator") {
-        return ctx.reply(
-          "🚫 **Admin Only**\n\n" +
-            "Only group admins can pause the fund.",
-          { parse_mode: "Markdown" }
-        );
-      }
+      // Check if user has started bot
+      const hasStarted = await checkUserHasStartedBot(ctx, userId);
+      if (!hasStarted) return;
+
+      // Check admin permissions
+      const isAdmin = await checkIsAdmin(ctx, userId);
+      if (!isAdmin) return;
 
       await ctx.reply("⏳ Pausing fund...");
 
@@ -138,15 +229,13 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      // Check if user is admin
-      const member = await ctx.getChatMember(parseInt(userId));
-      if (member.status !== "creator" && member.status !== "administrator") {
-        return ctx.reply(
-          "🚫 **Admin Only**\n\n" +
-            "Only group admins can resume the fund.",
-          { parse_mode: "Markdown" }
-        );
-      }
+      // Check if user has started bot
+      const hasStarted = await checkUserHasStartedBot(ctx, userId);
+      if (!hasStarted) return;
+
+      // Check admin permissions
+      const isAdmin = await checkIsAdmin(ctx, userId);
+      if (!isAdmin) return;
 
       await ctx.reply("⏳ Resuming fund...");
 
@@ -182,15 +271,13 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      // Check if user is admin
-      const member = await ctx.getChatMember(parseInt(userId));
-      if (member.status !== "creator" && member.status !== "administrator") {
-        return ctx.reply(
-          "🚫 **Admin Only**\n\n" +
-            "Only group admins can close the fund.",
-          { parse_mode: "Markdown" }
-        );
-      }
+      // Check if user has started bot
+      const hasStarted = await checkUserHasStartedBot(ctx, userId);
+      if (!hasStarted) return;
+
+      // Check admin permissions
+      const isAdmin = await checkIsAdmin(ctx, userId);
+      if (!isAdmin) return;
 
       // Confirmation prompt
       await ctx.reply(
@@ -205,7 +292,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
         { parse_mode: "Markdown" }
       );
 
-      // Wait for confirmation
+      // Wait for confirmation (note: this pattern has limitations, consider using sessions)
       bot.hears(/^yes$/i, async (confirmCtx) => {
         if (confirmCtx.from.id.toString() !== userId) return;
         if (confirmCtx.chat.id.toString() !== chatId) return;
@@ -243,6 +330,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       ctx.reply("❌ Failed to process request.", { parse_mode: "Markdown" });
     }
   });
+
   // FUND INFO Command
   bot.command("fundinfo", async (ctx) => {
     const chatId = ctx.chat.id.toString();
@@ -260,8 +348,11 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
 
       if (!fund || !fund.data) {
         return ctx.reply(
-          "❌ No fund found for this group.\n" +
-            "Use /initfund to set up a group fund.",
+          "❌ **No Fund Found**\n\n" +
+            "This group doesn't have a fund yet.\n\n" +
+            "Ask an admin to use /initfund to create one.\n\n" +
+            "⚠️ **Admin must start the bot first:**\n" +
+            `👉 @${ctx.botInfo?.username}`,
           { parse_mode: "Markdown" }
         );
       }
@@ -274,15 +365,17 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
         : "Unknown";
 
       ctx.reply(
-        `📊 *Group Fund Information*\n\n` +
-          `*Fund Name:* ${data.fundName ?? "-"}\n` +
-          `*Fund PDA:* \`${data.fundPdaAddress}\`\n` +
-          `*Owner:* ${owner}\n\n` +
-          `*Total Value:* ${Number(data.balanceSol).toFixed(2)} SOL\n` +
-          `*Min Contribution:* ${Number(data.minContributionSol).toFixed(2)} SOL\n` +
-          `*Trading Fee:* ${data.tradingFeePercent ?? data.tradingFeeBps / 100}%\n` +
-          `*Status:* ${status}\n` +
-          `\n${data.status === "ACTIVE" ? "Use /contribute to join the fund!" : "Fund is not accepting contributions."}`,
+        `📊 **Group Fund Information**\n\n` +
+          `**Fund Name:** ${data.fundName ?? "-"}\n` +
+          `**Fund PDA:** \`${data.fundPdaAddress}\`\n` +
+          `**Owner:** ${owner}\n\n` +
+          `**Total Value:** ${Number(data.balanceSol).toFixed(2)} SOL\n` +
+          `**Min Contribution:** ${Number(data.minContributionSol).toFixed(2)} SOL\n` +
+          `**Trading Fee:** ${data.tradingFeePercent ?? data.tradingFeeBps / 100}%\n` +
+          `**Status:** ${status}\n\n` +
+          `${data.status === "ACTIVE" 
+            ? "💰 Use /contribute to join the fund!\n\n⚠️ **Note:** You must start the bot first!\n👉 @" + ctx.botInfo?.username
+            : "⚠️ Fund is not accepting contributions."}`,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
@@ -290,7 +383,8 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
         ctx.reply(
           "⚠️ **No Fund Found**\n\n" +
             "This group doesn't have a fund yet.\n" +
-            "Ask an admin to use /initfund to create one."
+            "Ask an admin to use /initfund to create one.\n\n" +
+            "⚠️ Admin must start the bot first!"
         );
       } else {
         console.error("Error fetching fund info:", error);
@@ -302,62 +396,26 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
   });
 
-  // MY SHARES Command
-  // bot.command("myshares", async (ctx) => {
-  //   const chatId = ctx.chat.id.toString();
-  //   const userId = ctx.from.id.toString();
-
-  //   if (ctx.chat.type === "private") {
-  //     return ctx.reply(
-  //       "⚠️ This command only works in **group chats**.\n\n" +
-  //         "Use this in a group to view your position.",
-  //       { parse_mode: "Markdown" }
-  //     );
-  //   }
-
-  //   try {
-  //     const member = await fundService.getMemberInfo(chatId, userId);
-
-  //     ctx.reply(
-  //       `👤 **Your Position**\n\n` +
-  //         `📈 Shares: ${member.shares}\n` +
-  //         `💰 Total Contributed: ${(member.totalContributed / 1e9).toFixed(2)} SOL\n` +
-  //         `👔 Role: ${member.role}\n` +
-  //         `⭐ Reputation: ${member.reputationScore}\n\n` +
-  //         `Use /contribute to add more!`,
-  //       { parse_mode: "Markdown" }
-  //     );
-  //   } catch (error: any) {
-  //     if (error.response?.status === 404) {
-  //       ctx.reply(
-  //         "⚠️ **No Position Found**\n\n" +
-  //           "You haven't contributed to this fund yet.\n" +
-  //           "Use /contribute to join!"
-  //       );
-  //     } else {
-  //       console.error("Error fetching member info:", error);
-  //       ctx.reply(
-  //         "❌ **Could not fetch your information**\n\n" +
-  //           "Please try again later."
-  //       );
-  //     }
-  //   }
-  // });
-
   // HELP Command - List all fund commands
   bot.command("fundhelp", async (ctx) => {
     ctx.reply(
       "🔰 **Fund Commands**\n\n" +
-        "*Admin Commands:*\n" +
+        "**Admin Commands:**\n" +
         "• `/initfund` - Create a new fund\n" +
         "• `/pausefund` - Pause fund operations\n" +
         "• `/resumefund` - Resume fund operations\n" +
         "• `/closefund` - Close and delete fund\n\n" +
-        "*Member Commands:*\n" +
+        "**Member Commands:**\n" +
         "• `/fundinfo` - View fund details\n" +
         "• `/contribute` - Add funds to the group\n" +
-        "• `/myshares` - View your position\n" +
-        "• `/fundhelp` - Show this help message",
+        "• `/myvalue` - View your position\n" +
+        "• `/cashout` - Withdraw your funds\n" +
+        "• `/claimprofits` - Claim profits only\n" +
+        "• `/fundhelp` - Show this help message\n\n" +
+        "⚠️ **Important:**\n" +
+        `Before using any command, start the bot:\n` +
+        `👉 @${ctx.botInfo?.username}\n` +
+        `Send /start in private chat to create your wallet.`,
       { parse_mode: "Markdown" }
     );
   });

@@ -1,39 +1,23 @@
 // routes/tradeRoutes.ts
-import express from 'express';
+
+import { Router } from 'express';
 import {
-  createProposal,
-  approveTradeProposal,
-  getProposals,
-  getProposalById,
-  getPendingProposals,
-  syncProposal,
-  cleanupExpiredProposals,
+  executeTradeController,
+  checkTradePermissions,
+  getFundTradingInfoController,
+  getTradeHistoryController,
+  getFundStatistics,
 } from '../controllers/tradeController';
 
-const tradeRoute = express.Router();
+const router = Router();
 
+// ==================== TRADE EXECUTION ====================
+router.post('/execute', executeTradeController);
 
-// ==================== PROPOSAL ROUTES ====================
+// ==================== QUERY OPERATIONS ====================
+router.get('/permissions', checkTradePermissions);
+router.get('/info', getFundTradingInfoController);
+router.get('/history', getTradeHistoryController);
+router.get('/statistics', getFundStatistics);
 
-// Create a new trade proposal
-tradeRoute.post('/proposal', createProposal);
-
-// Approve a trade proposal
-tradeRoute.post('/proposal/approve', approveTradeProposal);
-
-// Get all proposals for a group
-tradeRoute.get('/proposals', getProposals);
-
-// Get proposal by ID
-tradeRoute.get('/proposal', getProposalById);
-
-// Get pending proposals
-tradeRoute.get('/proposals/pending', getPendingProposals);
-
-// Sync proposal with on-chain data
-tradeRoute.post('/proposal/sync', syncProposal);
-
-// Cleanup expired proposals
-tradeRoute.post('/proposals/cleanup', cleanupExpiredProposals);
-
-export default tradeRoute;
+export default router;
