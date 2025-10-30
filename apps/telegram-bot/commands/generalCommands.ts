@@ -2,8 +2,10 @@ import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
 import { prisma } from "@repo/db";
 import * as crypto from "crypto";
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { WalletService } from "../api/walletApiService";
 import { ApiService } from "../api/apiService";
+
 function decrypt(encryptedData: string, encryptionKey: string): string {
   const parts = encryptedData.split(":");
   const iv = Buffer.from(parts[0]!, "hex");
@@ -24,13 +26,13 @@ function decrypt(encryptedData: string, encryptionKey: string): string {
 export function registerGeneralCommands(bot: Telegraf<MyContext>) {
   const walletService = new WalletService();
   const apiService = new ApiService();
+
   bot.command("help", (ctx) => {
     const isPrivate = ctx.chat.type === "private";
 
     ctx.reply(
       `💡 **Bot Commands**\n\n` +
         `**🔐 Wallet** ${isPrivate ? "" : "(private chat)"}\n` +
-        `• /mybalance - Check balance\n` +
         `• /exportkey - Export private key\n\n` +
         `**🏦 Fund Management** ${isPrivate ? "(group chat)" : ""}\n` +
         `• /initfund - Create fund (admin)\n` +
@@ -42,17 +44,15 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
         `• /contribute - Add funds\n` +
         `• /myshares - Your position\n` +
         `• /mycontributions - Your history\n` +
-        `• /myfunds - All portfolios\n` +
-        `• /contributors - Fund members\n\n` +
-        `**💸 Withdrawals**\n` +
+        `• /contributors - Fund members\n` +
         `• /myvalue - Current value\n` +
+        `**💸 Withdrawals**\n` +
         `• /cashout - Exit completely\n` +
         `• /claimprofits - Take profits only\n` +
-        `• /myhistory - Withdrawal history\n\n` +
+        `• /myhistory - Withdrawal story\n\n` +
         `**⚡ Trading** ${isPrivate ? "(group chat)" : ""}\n` +
         `• /trade - Execute swap (admin)\n` +
         `• /tradehistory - Recent trades\n` +
-        `• /checkadmin - Check permissions\n\n` +
         `**ℹ️ Help**\n` +
         `• /fundhelp - Fund guide\n` +
         `• /contributehelp - How to contribute\n` +
@@ -61,7 +61,6 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
       { parse_mode: "Markdown" }
     );
   });
-
 
   bot.start(async (ctx) => {
     const telegramId = ctx.from.id.toString();
@@ -80,7 +79,6 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
             `**Quick Commands:**\n` +
             `/deposit - Get your deposit address\n` +
             `/mybalance - Check your balance\n` +
-            `/withdraw - Withdraw funds\n` +
             `/contribute - Join group fund\n` +
             `/help - View all commands`,
           { parse_mode: "Markdown" }
@@ -129,6 +127,61 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
       }
     }
   });
+
+  // ========== MY BALANCE ==========
+  bot.command("mybalance", async (ctx) => {
+    const userId = ctx.from.id.toString();
+
+    try {
+      // Get user wallet from database
+      const user = await prisma.user.findUnique({
+        where: { telegramId: userId },
+      });
+
+      if (!user || !user.walletAddress) {
+        return ctx.reply(
+          "❌ **No Wallet Found**\n\n" +
+            "You don't have a wallet yet.\n" +
+            "Use /start to create one.",
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      // Send loading message
+      const loadingMsg = await ctx.reply(
+        "⏳ Fetching balance...",
+        { parse_mode: "Markdown" }
+      );
+      const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com";
+      const connection = new Connection(rpcUrl, "confirmed");
+      const publicKey = new PublicKey(user.walletAddress);
+      const balanceLamports = await connection.getBalance(publicKey);
+      const balanceSOL = balanceLamports / LAMPORTS_PER_SOL;
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        undefined,
+        `💰 **Your Balance**\n\n` +
+          `**SOL:** ${balanceSOL.toFixed(4)} SOL\n` +
+          `**Lamports:** ${balanceLamports.toLocaleString()}\n\n` +
+          `**Wallet Address:**\n\`${user.walletAddress}\``,
+        { parse_mode: "Markdown" }
+      );
+
+      console.log(`Balance checked for ${userId}: ${balanceSOL} SOL`);
+    } catch (error: any) {
+      console.error("Balance fetch error:", error);
+      ctx.reply(
+        "❌ **Failed to Fetch Balance**\n\n" +
+          "Could not retrieve your wallet balance.\n\n" +
+          "• Check your internet connection\n" +
+          "• Try again in a moment\n" +
+          "• Contact support if persists",
+        { parse_mode: "Markdown" }
+      );
+    }
+  });
+
   // ========== EXPORT KEY ==========
   bot.command("exportkey", async (ctx) => {
     const userId = ctx.from.id.toString();
@@ -144,7 +197,7 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
     }
 
     try {
-      console.log("prisma is working correctly")
+      console.log("prisma is working correctly");
       // Get user from database
       const user = await prisma.user.findUnique({
         where: { telegramId: userId },
@@ -196,7 +249,6 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
         }
       );
     } catch (error: any) {
-      // console.error("Export key error:", error);
       ctx.reply("❌ Failed to process request. Please try again.");
     }
   });
@@ -238,7 +290,9 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
           { parse_mode: "Markdown" }
         );
       }
+
       const privateKey = decrypt(user.encryptedPrivateKey, encryptionKey);
+      
       await ctx.editMessageText(
         "✅ **Private Key Exported**\n\n" +
           "Your key is in the next message.\n\n" +
@@ -267,9 +321,9 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
         } catch (err) {
           console.error("Failed to send reminder:", err);
         }
-      }, 60000); 
-      console.log(`Private key exported by user: ${requestUserId} at ${new Date().toISOString()}`);
+      }, 60000);
 
+      console.log(`Private key exported by user: ${requestUserId} at ${new Date().toISOString()}`);
     } catch (error: any) {
       console.error("Decryption error:", error);
       ctx.editMessageText(

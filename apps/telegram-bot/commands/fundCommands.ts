@@ -87,7 +87,6 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
           `Min: ${(d.minContribution / 1e9).toFixed(2)} SOL\n` +
           `Fee: ${d.tradingFeeBps / 100}%\n\n` +
           `Members can now use /contribute!\n\n` +
-          `⚠️ They must start @${ctx.botInfo?.username} first.`,
         { parse_mode: "Markdown" }
       );
     } catch (error: any) {
