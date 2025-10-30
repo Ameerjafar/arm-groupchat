@@ -25,12 +25,9 @@ setInterval(() => {
   }
 }, 60000);
 
-// Generate short ID (8 characters)
 function generateTradeId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
-
-// ========== HELPER FUNCTIONS ==========
 
 function formatAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
@@ -238,13 +235,10 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       }
 
       ctx.editMessageText(msg, { parse_mode: "Markdown" });
-      
-      // Clean up on error
+
       pendingTrades.delete(tradeId);
     }
   });
-
-  // Handle trade cancel (shortened callback)
   bot.action(/^tx:(.+)$/, async (ctx) => {
     const tradeId = ctx.match[1];
     const clickUserId = ctx.from.id.toString();
@@ -269,8 +263,6 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
     await ctx.answerCbQuery();
     await ctx.editMessageText("❌ Trade cancelled.", { parse_mode: "Markdown" });
   });
-
-  // ========== TRADE HISTORY ==========
   bot.command("tradehistory", async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
