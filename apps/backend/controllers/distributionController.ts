@@ -15,8 +15,6 @@ import crypto from "crypto";
 import bs58 from "bs58";
 import idl from "../../../contract/groupchat_fund/target/idl/groupchat_fund.json";
 
-// ==================== HELPER FUNCTIONS ====================
-
 let connection: Connection;
 
 function initializeSolana() {

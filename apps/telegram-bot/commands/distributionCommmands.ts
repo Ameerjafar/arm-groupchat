@@ -142,8 +142,6 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
       if (!user?.walletAddress) {
         return ctx.reply("🔐 Create a wallet first: /start");
       }
-
-      // Calculate profit
       const calcResponse = await distributionApi.calculateProfit(
         chatId,
         user.walletAddress
@@ -175,8 +173,6 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
           `Processing...`,
         { parse_mode: "Markdown" }
       );
-
-      // Execute claim
       const response = await distributionApi.claimProfit(chatId, userId);
 
       if (!response.success) {
@@ -204,7 +200,6 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
     }
   });
 
-  // ========== CASH OUT ALL (Admin) ==========
   bot.command("cashoutall", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();
@@ -317,8 +312,6 @@ export function registerDistributionCommands(bot: Telegraf<MyContext>) {
       await ctx.reply(`❌ ${error.response?.data?.error || error.message}`);
     }
   });
-
-  // ========== MY HISTORY ==========
   bot.command("myhistory", async (ctx) => {
     const userId = ctx.from.id.toString();
     const chatId = ctx.chat?.id.toString();
