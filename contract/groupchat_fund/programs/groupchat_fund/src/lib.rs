@@ -3,7 +3,7 @@ use anchor_lang::system_program::{transfer, Transfer as SystemTransfer};
 use anchor_spl::token::{self, Token, TokenAccount, Transfer as TokenTransfer};
 use anchor_spl::associated_token::AssociatedToken;
 
-declare_id!("9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy");
+declare_id!("JDomJJbEK48FriJ5RVuTmgDGbNN8DLKAv33NdTydcWWd");
 
 #[program]
 pub mod groupchat_fund {

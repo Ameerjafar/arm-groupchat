@@ -1,71 +1,87 @@
-import { Request, Response, NextFunction } from 'express';
-import { prisma } from '@repo/db';
-import * as anchor from '@coral-xyz/anchor';
-import { Program } from '@coral-xyz/anchor';
-import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import bs58 from 'bs58';
-import { GroupchatFund } from '../../../contract/groupchat_fund/target/types/groupchat_fund';
-import IDL from '../../../contract/groupchat_fund/target/idl/groupchat_fund.json';
-import { syncFundBalance } from '../services/solanaServices/syncService';
+// controllers/tradeController.ts
+import { Request, Response, NextFunction } from "express";
+import { prisma } from "@repo/db";
+import { Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import {
   executeTrade,
   canExecuteTrade,
   getFundTradingInfo,
-} from '../services/solanaServices/tradeServices';
-import { decrypt } from '../services/utlis';
+  getTradeHistory,
+  getFundPDA,
+} from "../services/solanaServices/tradeServices";
+import * as anchor from "@coral-xyz/anchor";
+import IDL from "../../../contract/groupchat_fund/target/idl/groupchat_fund.json";
+import { GroupchatFund } from "../../../contract/groupchat_fund/target/types/groupchat_fund";
+import { PublicKey } from "@solana/web3.js";
 
-// Solana setup
+// ==================== SETUP ====================
+
 const connection = new Connection(
-  process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
-  'confirmed'
+  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  "confirmed"
 );
 
 const programId = new PublicKey(
-  process.env.PROGRAM_ID || '9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy'
+  process.env.PROGRAM_ID || "JDomJJbEK48FriJ5RVuTmgDGbNN8DLKAv33NdTydcWWd"
 );
 
-function getProgram(wallet: anchor.Wallet): Program<GroupchatFund> {
-  const provider = new anchor.AnchorProvider(connection, wallet, {
-    commitment: 'confirmed',
-  });
+/**
+ * Get program for reading on-chain data
+ */
+function getProgramForReading(): anchor.Program<GroupchatFund> {
+  const provider = new anchor.AnchorProvider(
+    connection,
+    {} as any,
+    { commitment: "confirmed" }
+  );
   return new anchor.Program<GroupchatFund>(IDL as any, provider);
 }
 
-// Helper function to get user keypair from database
-async function getUserKeypair(telegramId: string): Promise<Keypair | null> {
+/**
+ * Sync fund balance and shares after trade
+ */
+async function syncFundAfterTrade(groupId: string): Promise<void> {
   try {
-    const user = await prisma.user.findUnique({
-      where: { telegramId },
-      select: {
-        encryptedPrivateKey: true,
-        walletAddress: true,
+    console.log("📊 Syncing fund state after trade...");
+
+    const program = getProgramForReading();
+    const [fundPDA] = getFundPDA(groupId, program.programId);
+
+    // Fetch latest on-chain fund data
+    const fundAccount = await program.account.fund.fetch(fundPDA);
+
+    console.log("📈 On-chain fund state:", {
+      totalValue: fundAccount.totalValue.toNumber() / LAMPORTS_PER_SOL,
+      totalShares: fundAccount.totalShares.toNumber(),
+      isActive: fundAccount.isActive,
+    });
+
+    // Convert BN to string for Prisma BigInt
+    const balanceString = fundAccount.totalValue.toString();
+    const sharesString = fundAccount.totalShares.toString();
+
+    console.log("🔄 Converting to database format:", {
+      balance: balanceString,
+      shares: sharesString,
+    });
+
+    // Update database with latest on-chain values
+    await prisma.fund.update({
+      where: { groupId },
+      data: {
+        balance: BigInt(balanceString),
+        updatedAt: new Date(),
       },
     });
 
-    if (!user || !user.encryptedPrivateKey) {
-      console.error('User not found or no encrypted private key');
-      return null;
-    }
-
-    // Decrypt the private key
-    const decryptedPrivateKey = decrypt(user.encryptedPrivateKey);
-
-    // Convert base58 string to Keypair
-    const privateKeyBytes = bs58.decode(decryptedPrivateKey);
-    const keypair = Keypair.fromSecretKey(privateKeyBytes);
-
-    // Verify the public key matches
-    if (keypair.publicKey.toString() !== user.walletAddress) {
-      console.error('Decrypted keypair does not match stored wallet address');
-      return null;
-    }
-
-    return keypair;
-  } catch (error) {
-    console.error('Error loading user keypair:', error);
-    return null;
+    console.log("✅ Fund state synced to database");
+  } catch (error: any) {
+    console.error("⚠️ Error syncing fund after trade:", error.message);
+    // Don't throw - trade was successful, just warn about sync issue
   }
 }
+
+// ==================== EXECUTE TRADE ====================
 
 export const executeTradeController = async (
   req: Request,
@@ -82,13 +98,14 @@ export const executeTradeController = async (
       minimumOut,
     } = req.body;
 
-    console.log('Executing trade...');
+    console.log("📥 Executing trade...");
+    console.log("Inputs:", { groupId, telegramId, fromToken, toToken, amount, minimumOut });
 
     // Validate inputs
     if (!groupId || !telegramId || !fromToken || !toToken || !amount || !minimumOut) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: groupId, telegramId, fromToken, toToken, amount, minimumOut',
+        message: "Missing required fields: groupId, telegramId, fromToken, toToken, amount, minimumOut",
       });
     }
 
@@ -100,14 +117,14 @@ export const executeTradeController = async (
     if (!fund) {
       return res.status(404).json({
         success: false,
-        message: 'Fund not found for this group',
+        message: "Fund not found for this group",
       });
     }
 
-    if (fund.status !== 'ACTIVE') {
+    if (fund.status !== "ACTIVE") {
       return res.status(400).json({
         success: false,
-        message: 'Fund is not active',
+        message: "Fund is not active",
       });
     }
 
@@ -119,7 +136,7 @@ export const executeTradeController = async (
     if (!user || !user.walletAddress) {
       return res.status(404).json({
         success: false,
-        message: 'User not found or wallet not connected',
+        message: "User not found or wallet not connected",
       });
     }
 
@@ -127,7 +144,7 @@ export const executeTradeController = async (
     if (user.walletAddress !== fund.initiator) {
       return res.status(403).json({
         success: false,
-        message: 'Only fund authority (admin) can execute trades',
+        message: "Only fund authority (admin) can execute trades",
       });
     }
 
@@ -137,11 +154,12 @@ export const executeTradeController = async (
     if (!canTrade) {
       return res.status(403).json({
         success: false,
-        message: reason || 'You are not authorized to execute trades',
+        message: reason || "You are not authorized to execute trades",
       });
     }
 
     // Execute trade on blockchain
+    console.log("🚀 Calling executeTrade service...");
     const blockchainResult = await executeTrade(
       groupId,
       telegramId,
@@ -150,70 +168,79 @@ export const executeTradeController = async (
       amount,
       minimumOut
     );
+
     if (!blockchainResult?.success) {
       return res.status(500).json({
         success: false,
-        message: 'Failed to execute trade on blockchain',
+        message: "Failed to execute trade on blockchain",
+        error: blockchainResult?.message,
       });
     }
-    let newBalance = 0;
-    try {
-      newBalance = await syncFundBalance(groupId);
-      console.log(`✅ Database synced: ${newBalance / LAMPORTS_PER_SOL} SOL`);
-    } catch (syncError) {
-      console.error('⚠️ Database sync failed (trade still successful):', syncError);
-      // Trade succeeded, sync failed - non-critical
-    }
+
+    console.log("✅ Trade executed on blockchain");
 
     // Log transaction in database
-    await prisma.transaction.create({
+    const txRecord = await prisma.transaction.create({
       data: {
         fundId: fund.id,
-        type: 'TRADE',
+        type: "TRADE",
         amount: BigInt(amount),
-        signature: blockchainResult.transactionSignature,
-        fromAddress: fromToken,
-        toAddress: toToken,
+        signature: blockchainResult.transactionSignature!,
+        fromAddress: blockchainResult.fromToken,
+        toAddress: blockchainResult.toToken,
         initiator: telegramId,
-        status: 'CONFIRMED',
+        status: "CONFIRMED",
       },
     });
 
+    console.log("💾 Transaction logged in database:", txRecord.id);
+
+    // SYNC FUND STATE AFTER TRADE
+    await syncFundAfterTrade(groupId);
+
+    // Fetch updated fund data for response
+    const updatedFund = await prisma.fund.findUnique({
+      where: { groupId },
+    });
+
+    const newBalanceSOL = updatedFund ? Number(updatedFund.balance) / LAMPORTS_PER_SOL : 0;
+
+    console.log("💰 Updated fund balance:", newBalanceSOL, "SOL");
+
     return res.status(201).json({
       success: true,
-      message: 'Trade executed successfully',
-      transactionSignature: blockchainResult.transactionSignature, 
+      message: "Trade executed successfully",
       data: {
         fromToken: blockchainResult.fromToken,
         toToken: blockchainResult.toToken,
         amount: blockchainResult.amount,
         minimumOut: blockchainResult.minimumOut,
-        newBalance: newBalance / LAMPORTS_PER_SOL,
-        transactionSignature: blockchainResult.transactionSignature, // ✅ Also in data
+        transactionSignature: blockchainResult.transactionSignature,
         explorerUrl: `https://explorer.solana.com/tx/${blockchainResult.transactionSignature}?cluster=devnet`,
+        updatedFundBalance: newBalanceSOL,
       },
     });
   } catch (error: any) {
-    console.error('Error executing trade:', error);
+    console.error("❌ Error executing trade:", error);
 
-    if (error.message?.includes('InsufficientFunds') || error.message?.includes('Insufficient funds')) {
+    if (error.message?.includes("InsufficientFunds") || error.message?.includes("Insufficient funds")) {
       return res.status(400).json({
         success: false,
         message: error.message,
       });
     }
 
-    if (error.message?.includes('UnauthorizedTrader')) {
+    if (error.message?.includes("UnauthorizedTrader") || error.message?.includes("Only fund authority")) {
       return res.status(403).json({
         success: false,
-        message: 'Only fund authority can execute trades',
+        message: "Only fund authority can execute trades",
       });
     }
 
-    if (error.message?.includes('FundNotActive')) {
+    if (error.message?.includes("FundNotActive")) {
       return res.status(400).json({
         success: false,
-        message: 'Fund is not active',
+        message: "Fund is not active",
       });
     }
 
@@ -223,6 +250,10 @@ export const executeTradeController = async (
 
 // ==================== QUERY OPERATIONS ====================
 
+/**
+ * Check if user can execute trades
+ * GET /api/trade/check-permissions?groupId=...&telegramId=...
+ */
 export const checkTradePermissions = async (
   req: Request,
   res: Response,
@@ -234,7 +265,7 @@ export const checkTradePermissions = async (
     if (!groupId || !telegramId) {
       return res.status(400).json({
         success: false,
-        message: 'groupId and telegramId are required',
+        message: "groupId and telegramId are required",
       });
     }
 
@@ -247,16 +278,23 @@ export const checkTradePermissions = async (
       success: true,
       data: {
         canTrade,
-        reason: reason || (canTrade ? 'Authorized to trade' : 'Not authorized'),
+        reason: reason || (canTrade ? "Authorized to trade" : "Not authorized"),
       },
     });
   } catch (error: any) {
-    console.error('Error checking trade permissions:', error);
-    return next(error);
+    console.error("Error checking trade permissions:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error checking permissions",
+      error: error.message,
+    });
   }
 };
 
-
+/**
+ * Get fund trading info
+ * GET /api/trade/info?groupId=...
+ */
 export const getFundTradingInfoController = async (
   req: Request,
   res: Response,
@@ -268,7 +306,7 @@ export const getFundTradingInfoController = async (
     if (!groupId) {
       return res.status(400).json({
         success: false,
-        message: 'groupId is required',
+        message: "groupId is required",
       });
     }
 
@@ -279,7 +317,7 @@ export const getFundTradingInfoController = async (
     if (!fund) {
       return res.status(404).json({
         success: false,
-        message: 'Fund not found',
+        message: "Fund not found",
       });
     }
 
@@ -287,17 +325,25 @@ export const getFundTradingInfoController = async (
 
     return res.json({
       success: true,
-      message: 'Fund trading info retrieved successfully',
-      data: tradingInfo,
+      message: "Fund trading info retrieved successfully",
+      data: {
+        ...tradingInfo,
+        databaseBalance: Number(fund.balance) / LAMPORTS_PER_SOL,
+      },
     });
   } catch (error: any) {
-    console.error('Error fetching fund trading info:', error);
-    return next(error);
+    console.error("Error fetching fund trading info:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching fund trading info",
+      error: error.message,
+    });
   }
 };
 
 /**
  * Get trade history for a fund
+ * GET /api/trade/history?groupId=...&limit=10
  */
 export const getTradeHistoryController = async (
   req: Request,
@@ -310,7 +356,7 @@ export const getTradeHistoryController = async (
     if (!groupId) {
       return res.status(400).json({
         success: false,
-        message: 'groupId is required',
+        message: "groupId is required",
       });
     }
 
@@ -321,51 +367,36 @@ export const getTradeHistoryController = async (
     if (!fund) {
       return res.status(404).json({
         success: false,
-        message: 'Fund not found',
+        message: "Fund not found",
       });
     }
 
-    // Get from database
-    const trades = await prisma.transaction.findMany({
-      where: {
-        fundId: fund.id,
-        type: 'TRADE',
-      },
-      orderBy: {
-        timestamp: 'desc',
-      },
-      take: limit ? parseInt(limit as string) : 10,
-    });
+    const result = await getTradeHistory(
+      groupId as string,
+      limit ? parseInt(limit as string) : 10
+    );
 
     return res.json({
-      success: true,
-      message: 'Trade history retrieved successfully',
+      success: result.success,
+      message: "Trade history retrieved successfully",
       data: {
-        trades: trades.map(t => ({
-          id: t.id,
-          type: t.type,
-          amount: t.amount.toString(),
-          fromAddress: t.fromAddress,
-          toAddress: t.toAddress,
-          signature: t.signature,
-          status: t.status,
-          initiator: t.initiator,
-          timestamp: t.timestamp,
-          explorerUrl: t.signature 
-            ? `https://explorer.solana.com/tx/${t.signature}?cluster=devnet`
-            : null,
-        })),
-        total: trades.length,
+        trades: result.trades,
+        total: result.total,
       },
     });
   } catch (error: any) {
-    console.error('Error fetching trade history:', error);
-    return next(error);
+    console.error("Error fetching trade history:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching trade history",
+      error: error.message,
+    });
   }
 };
 
 /**
  * Get fund statistics
+ * GET /api/trade/stats?groupId=...
  */
 export const getFundStatistics = async (
   req: Request,
@@ -378,7 +409,7 @@ export const getFundStatistics = async (
     if (!groupId) {
       return res.status(400).json({
         success: false,
-        message: 'groupId is required',
+        message: "groupId is required",
       });
     }
 
@@ -386,7 +417,7 @@ export const getFundStatistics = async (
       where: { groupId: groupId as string },
       include: {
         transactions: {
-          where: { type: 'TRADE' },
+          where: { type: "TRADE" },
         },
       },
     });
@@ -394,28 +425,43 @@ export const getFundStatistics = async (
     if (!fund) {
       return res.status(404).json({
         success: false,
-        message: 'Fund not found',
+        message: "Fund not found",
       });
     }
 
     const totalTrades = fund.transactions.length;
     const successfulTrades = fund.transactions.filter(
-      t => t.status === 'CONFIRMED'
+      (t) => t.status === "CONFIRMED"
     ).length;
+    const failedTrades = totalTrades - successfulTrades;
+
+    // Calculate total volume
+    const totalVolume = fund.transactions.reduce(
+      (sum, t) => sum + t.amount,
+      BigInt(0)
+    );
 
     return res.json({
       success: true,
-      message: 'Fund statistics retrieved successfully',
+      message: "Fund statistics retrieved successfully",
       data: {
         totalTrades,
         successfulTrades,
-        failedTrades: totalTrades - successfulTrades,
+        failedTrades,
+        totalVolumeSOL: Number(totalVolume) / LAMPORTS_PER_SOL,
+        currentBalanceSOL: Number(fund.balance) / LAMPORTS_PER_SOL,
         fundStatus: fund.status,
+        fundName: fund.fundName,
         createdAt: fund.createdAt,
+        updatedAt: fund.updatedAt,
       },
     });
   } catch (error: any) {
-    console.error('Error fetching fund statistics:', error);
-    return next(error);
+    console.error("Error fetching fund statistics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching fund statistics",
+      error: error.message,
+    });
   }
 };

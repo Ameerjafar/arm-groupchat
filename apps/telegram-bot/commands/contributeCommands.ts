@@ -7,7 +7,7 @@ import { ApiService } from "../api/apiService";
 export function registerContributorCommands(bot: Telegraf<MyContext>) {
   const fundService = new FundService();
   const contributionService = new ContributionApiService();
-  const apiService = new ApiService();
+  const apiService = new ApiService(); 
 
   // ========== CONTRIBUTE ==========
   bot.command("contribute", async (ctx) => {
@@ -85,7 +85,7 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
       // ✅ Check user balance
       const balanceResponse = await apiService.getUserBalance(userId);
       const userBalance = Number(balanceResponse.data.balance);
-      
+      console.log(fundData);
       if (userBalance < amount) {
         return ctx.reply(
           `❌ Insufficient balance!\n\n` +
@@ -98,7 +98,7 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
 
       // Confirm contribution
       await ctx.reply(
-        `💰 Confirm ${amount.toFixed(4)} SOL to ${fundData.fundName}?`,
+        `💰 Confirm ${amount.toFixed(4)} SOL to ${ctx.chat.title}?`,
         {
           parse_mode: "Markdown",
           reply_markup: {
@@ -221,7 +221,7 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
 
       ctx.reply(
         `📊 **Your Position**\n\n` +
-          `**${fundInfo.fundName}**\n` +
+          `**fund Name:${fundInfo.fundName}**\n` +
           `Shares: ${userPosition.shares}\n` +
           `Value: ${userPosition.currentValueSol.toFixed(4)} SOL\n` +
           `Ownership: ${userPosition.ownershipPercentage}%\n\n` +

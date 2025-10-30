@@ -2,7 +2,8 @@ import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
 import { prisma } from "@repo/db";
 import * as crypto from "crypto";
-
+import { WalletService } from "../api/walletApiService";
+import { ApiService } from "../api/apiService";
 function decrypt(encryptedData: string, encryptionKey: string): string {
   const parts = encryptedData.split(":");
   const iv = Buffer.from(parts[0]!, "hex");
@@ -21,7 +22,8 @@ function decrypt(encryptedData: string, encryptionKey: string): string {
 }
 
 export function registerGeneralCommands(bot: Telegraf<MyContext>) {
-  
+  const walletService = new WalletService();
+  const apiService = new ApiService();
   bot.command("help", (ctx) => {
     const isPrivate = ctx.chat.type === "private";
 
@@ -60,6 +62,73 @@ export function registerGeneralCommands(bot: Telegraf<MyContext>) {
     );
   });
 
+
+  bot.start(async (ctx) => {
+    const telegramId = ctx.from.id.toString();
+    const username = ctx.from.username || ctx.from.first_name || "Unknown";
+    const groupId = ctx.chat.id.toString();
+
+    try {
+      const walletCheck = await walletService.checkWallet(telegramId);
+
+      if (walletCheck.hasWallet) {
+        const addMemberRes = await apiService.addGroupMember(telegramId, groupId);
+        console.log(`✅ Added ${username} to group: ${addMemberRes.data.message}`);
+        
+        return ctx.reply(
+          `🎉 Welcome back in another group, ${ctx.from.first_name}!\n\n` +
+            `**Quick Commands:**\n` +
+            `/deposit - Get your deposit address\n` +
+            `/mybalance - Check your balance\n` +
+            `/withdraw - Withdraw funds\n` +
+            `/contribute - Join group fund\n` +
+            `/help - View all commands`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      const { publicKey, encryptedPrivateKey } = walletService.generateWallet();
+
+      await apiService.createUser({
+        telegramId,
+        username,
+        walletAddress: publicKey,
+        encryptedPrivateKey,
+        groupId
+      });
+
+      await ctx.reply(
+        `🎉 Welcome to Group Fund Bot, ${ctx.from.first_name}!\n\n` +
+          `✅ Your wallet has been created:\n\`${publicKey}\`\n\n` +
+          `📥 **Next Steps:**\n` +
+          `1. Deposit SOL to start trading\n` +
+          `2. Use /mybalance to check your balance\n` +
+          `3. Use /contribute to join group funds\n\n` +
+          `🔒 **Security Note:**\n` +
+          `We securely custody your keys. Use /exportkey anytime to retrieve your private key.\n\n` +
+          `Need help? Type /help for all commands.`,
+        { parse_mode: "Markdown" }
+      );
+
+      console.log(`✅ Created wallet for ${telegramId} (${username}): ${publicKey}`);
+    } catch (error: any) {
+      const errMessage = error.response?.data.message;
+      
+      if (errMessage === "you are already in the group") {
+        ctx.reply("you are already a member of this group don't worry");
+      } else {
+        console.error("Error creating wallet:", error.message);
+        ctx.reply(
+          "❌ **Wallet Creation Failed**\n\n" +
+            "We couldn't create your wallet. Please try again:\n" +
+            "• Use /start to retry\n" +
+            "• Check your internet connection\n" +
+            "• Contact support if the issue persists",
+          { parse_mode: "Markdown" }
+        );
+      }
+    }
+  });
   // ========== EXPORT KEY ==========
   bot.command("exportkey", async (ctx) => {
     const userId = ctx.from.id.toString();

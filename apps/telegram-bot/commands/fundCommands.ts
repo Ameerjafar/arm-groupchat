@@ -83,7 +83,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
 
       ctx.reply(
         `✅ **Fund Created**\n\n` +
-          `${d.fundName}\n` +
+          `Fund Name ${d.fundName}\n` +
           `Min: ${(d.minContribution / 1e9).toFixed(2)} SOL\n` +
           `Fee: ${d.tradingFeeBps / 100}%\n\n` +
           `Members can now use /contribute!\n\n` +
@@ -287,8 +287,8 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
 
     try {
       const fund = await fundService.getFundInfo(chatId);
-
-      if (!fund?.data) {
+      const fundData = fund.data;
+      if (!fundData) {
         return ctx.reply(
           `❌ **No Fund**\n\n` +
             `Ask an admin to use /initfund.\n\n` +
@@ -301,7 +301,7 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
       const statusEmoji = d.status === "ACTIVE" ? "🟢" : d.status === "PAUSED" ? "🟡" : "🔴";
 
       ctx.reply(
-        `📊 **${d.fundName ?? "Group Fund"}**\n\n` +
+        `📊 **Group Name: ${d.fundName ?? "Group Fund"}**\n\n` +
           `Balance: ${Number(d.balanceSol).toFixed(2)} SOL\n` +
           `Min: ${Number(d.minContributionSol).toFixed(2)} SOL\n` +
           `Fee: ${d.tradingFeePercent ?? d.tradingFeeBps / 100}%\n` +

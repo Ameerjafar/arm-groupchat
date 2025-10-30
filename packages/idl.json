@@ -1,5 +1,5 @@
 {
-  "address": "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy",
+  "address": "JDomJJbEK48FriJ5RVuTmgDGbNN8DLKAv33NdTydcWWd",
   "metadata": {
     "name": "groupchat_fund",
     "version": "0.1.0",
@@ -175,8 +175,7 @@
     {
       "name": "distribute_profits",
       "docs": [
-        "✅ FIXED: Distribute only profits to member (original behavior)",
-        "This only allows distribution if there's profit"
+        "✅ FIXED: Distribute only profits to member"
       ],
       "discriminator": [
         251,
@@ -253,9 +252,7 @@
     {
       "name": "distribute_value",
       "docs": [
-        "✅ FIXED: Distribute current value to member (profit OR loss)",
-        "This distributes the member's proportional share of current fund value",
-        "Trading fee only applied if there's profit"
+        "✅ FIXED: Distribute current value to member (profit OR loss)"
       ],
       "discriminator": [
         210,
@@ -330,16 +327,63 @@
       "args": []
     },
     {
-      "name": "execute_trade",
+      "name": "execute_jupiter_swap",
+      "docs": [
+        "✅ Execute Jupiter swap through CPI (advanced - requires Jupiter CPI)",
+        "This actually executes the swap on-chain through Jupiter's program"
+      ],
       "discriminator": [
-        77,
-        16,
-        192,
-        135,
-        13,
         0,
-        106,
-        97
+        153,
+        94,
+        101,
+        168,
+        72,
+        220,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "jupiter_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_in",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_amount_out",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "execute_trade_mock",
+      "docs": [
+        "🎭 DEMO ONLY: Mock swap for testing (keeps for backward compatibility)"
+      ],
+      "discriminator": [
+        87,
+        231,
+        3,
+        105,
+        49,
+        151,
+        112,
+        93
       ],
       "accounts": [
         {
@@ -365,60 +409,6 @@
           "name": "to_token",
           "type": "pubkey"
         },
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "minimum_out",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "execute_trade_real",
-      "discriminator": [
-        201,
-        62,
-        128,
-        75,
-        252,
-        108,
-        136,
-        122
-      ],
-      "accounts": [
-        {
-          "name": "fund",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "fund_token_account",
-          "writable": true
-        },
-        {
-          "name": "counterparty_token_account",
-          "writable": true
-        },
-        {
-          "name": "counterparty",
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
         {
           "name": "amount",
           "type": "u64"
@@ -515,6 +505,51 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "record_swap",
+      "docs": [
+        "✅ NEW: Execute real swap using Jupiter (called by off-chain bot after Jupiter execution)",
+        "The bot executes the swap via Jupiter SDK, then calls this to update fund accounting"
+      ],
+      "discriminator": [
+        164,
+        158,
+        148,
+        54,
+        167,
+        137,
+        171,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "fund",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_in",
+          "type": "u64"
+        },
+        {
+          "name": "amount_out",
+          "type": "u64"
+        },
+        {
+          "name": "from_token",
+          "type": "pubkey"
+        },
+        {
+          "name": "to_token",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "resume_fund",

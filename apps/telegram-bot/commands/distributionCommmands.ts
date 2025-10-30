@@ -1,6 +1,6 @@
 import { Telegraf } from "telegraf";
 import { MyContext } from "../types/context";
-import { DistributionApiService } from "../services/distribtuionApiService";
+import { DistributionApiService } from "../api/distribtuionApi";
 import { prisma } from "@repo/db";
 
 const distributionApi = new DistributionApiService();

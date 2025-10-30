@@ -3,6 +3,33 @@ import { MyContext } from "../types/context";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { TradeApiService } from "../api/tradeApi";
 
+// ========== TEMPORARY TRADE STORAGE ==========
+// Store pending trades in memory with short IDs
+const pendingTrades = new Map<string, {
+  chatId: string;
+  userId: string;
+  fromToken: string;
+  toToken: string;
+  amount: number;
+  minOut: number;
+  expiresAt: number;
+}>();
+
+// Clean up expired trades every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, trade] of pendingTrades.entries()) {
+    if (trade.expiresAt < now) {
+      pendingTrades.delete(id);
+    }
+  }
+}, 60000);
+
+// Generate short ID (8 characters)
+function generateTradeId(): string {
+  return Math.random().toString(36).substring(2, 10);
+}
+
 // ========== HELPER FUNCTIONS ==========
 
 function formatAddress(address: string): string {
@@ -38,8 +65,6 @@ function fromSmallestUnit(amount: string, decimals: number = 9): number {
 function getTokenDecimals(address: string): number {
   return address === "So11111111111111111111111111111111111111112" ? 9 : 6;
 }
-
-// ========== REGISTER COMMANDS ==========
 
 export function registerTradeCommands(bot: Telegraf<MyContext>) {
   const tradeService = new TradeApiService();
@@ -92,7 +117,19 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       const fromName = getTokenName(fromToken);
       const toName = getTokenName(toToken);
 
-      // Show confirmation with inline buttons
+      // Generate short trade ID and store trade details
+      const tradeId = generateTradeId();
+      pendingTrades.set(tradeId, {
+        chatId,
+        userId,
+        fromToken,
+        toToken,
+        amount,
+        minOut,
+        expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
+      });
+
+      // Show confirmation with inline buttons (SHORT callback data)
       await ctx.reply(
         `⚡ **Confirm Trade**\n\n` +
           `${amount} ${fromName} → ${minOut}+ ${toName}\n\n` +
@@ -105,11 +142,11 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
               [
                 {
                   text: "✅ Execute",
-                  callback_data: `trade_confirm:${chatId}:${userId}:${fromToken}:${toToken}:${amount}:${minOut}`,
+                  callback_data: `tc:${tradeId}`, // ✅ Only 11 bytes!
                 },
                 {
                   text: "❌ Cancel",
-                  callback_data: `trade_cancel:${chatId}:${userId}`,
+                  callback_data: `tx:${tradeId}`, // ✅ Only 11 bytes!
                 },
               ],
             ],
@@ -122,13 +159,31 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
     }
   });
 
-  // Handle trade confirmation
-  bot.action(/^trade_confirm:(.+):(.+):(.+):(.+):(.+):(.+)$/, async (ctx) => {
-    const [, chatId, requestUserId, fromToken, toToken, amountStr, minOutStr] = ctx.match;
+  // Handle trade confirmation (shortened callback)
+  bot.action(/^tc:(.+)$/, async (ctx) => {
+    const tradeId = ctx.match[1];
     const clickUserId = ctx.from.id.toString();
 
-    if (clickUserId !== requestUserId) {
-      return ctx.answerCbQuery("⚠️ Only you can confirm this.", {
+    // Get trade details from memory
+    const trade = pendingTrades.get(tradeId);
+
+    if (!trade) {
+      return ctx.answerCbQuery("⚠️ Trade expired or not found.", {
+        show_alert: true,
+      });
+    }
+
+    // Verify user
+    if (clickUserId !== trade.userId) {
+      return ctx.answerCbQuery("⚠️ Only the requester can confirm this.", {
+        show_alert: true,
+      });
+    }
+
+    // Check expiration
+    if (trade.expiresAt < Date.now()) {
+      pendingTrades.delete(tradeId);
+      return ctx.answerCbQuery("⚠️ Trade expired.", {
         show_alert: true,
       });
     }
@@ -137,32 +192,33 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       await ctx.answerCbQuery();
       await ctx.editMessageText("⏳ Executing trade...", { parse_mode: "Markdown" });
 
-      const amount = parseFloat(amountStr as string);
-      const minOut = parseFloat(minOutStr as string);
-      
-      const fromDecimals = getTokenDecimals(fromToken as string);
-      const toDecimals = getTokenDecimals(toToken as string);
+      const fromDecimals = getTokenDecimals(trade.fromToken);
+      const toDecimals = getTokenDecimals(trade.toToken);
 
-      const amountSmallest = toSmallestUnit(amount, fromDecimals);
-      const minOutSmallest = toSmallestUnit(minOut, toDecimals);
+      const amountSmallest = toSmallestUnit(trade.amount, fromDecimals);
+      const minOutSmallest = toSmallestUnit(trade.minOut, toDecimals);
 
       const result = await tradeService.executeTrade({
-        groupId: chatId as string,
-        telegramId: requestUserId,
-        fromToken: fromToken as string,
-        toToken: toToken as string,
+        groupId: trade.chatId,
+        telegramId: trade.userId,
+        fromToken: trade.fromToken,
+        toToken: trade.toToken,
         amount: amountSmallest,
         minimumOut: minOutSmallest,
       });
 
+      // Clean up
+      pendingTrades.delete(tradeId);
+
       if (result.success) {
-        const fromName = getTokenName(fromToken as string);
-        const toName = getTokenName(toToken as string);
+        const fromName = getTokenName(trade.fromToken);
+        const toName = getTokenName(trade.toToken);
 
         return ctx.editMessageText(
           `✅ **Trade Complete**\n\n` +
-            `${amount} ${fromName} → ${minOut}+ ${toName}\n\n` +
-            `Check /fundinfo for updated balance.`,
+            `${trade.amount} ${fromName} → ${trade.minOut}+ ${toName}\n\n` +
+            `New Balance: ${result.data.newBalance} SOL\n\n` +
+            `[View on Explorer](${result.data.explorerUrl})`,
           { parse_mode: "Markdown" }
         );
       }
@@ -177,22 +233,38 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
         msg = "❌ Insufficient balance.\n\nCheck /fundinfo.";
       } else if (errorMsg.includes("FundNotActive")) {
         msg = "❌ Fund is paused.\n\nAsk admin to resume.";
+      } else {
+        msg = `❌ Trade failed: ${errorMsg}`;
       }
 
       ctx.editMessageText(msg, { parse_mode: "Markdown" });
+      
+      // Clean up on error
+      pendingTrades.delete(tradeId);
     }
   });
 
-  // Handle trade cancel
-  bot.action(/^trade_cancel:(.+):(.+)$/, async (ctx) => {
-    const [, chatId, requestUserId] = ctx.match;
+  // Handle trade cancel (shortened callback)
+  bot.action(/^tx:(.+)$/, async (ctx) => {
+    const tradeId = ctx.match[1];
     const clickUserId = ctx.from.id.toString();
 
-    if (clickUserId !== requestUserId) {
-      return ctx.answerCbQuery("⚠️ Only you can cancel this.", {
+    const trade = pendingTrades.get(tradeId);
+
+    if (!trade) {
+      return ctx.answerCbQuery("⚠️ Trade expired or not found.", {
         show_alert: true,
       });
     }
+
+    if (clickUserId !== trade.userId) {
+      return ctx.answerCbQuery("⚠️ Only the requester can cancel this.", {
+        show_alert: true,
+      });
+    }
+
+    // Clean up
+    pendingTrades.delete(tradeId);
 
     await ctx.answerCbQuery();
     await ctx.editMessageText("❌ Trade cancelled.", { parse_mode: "Markdown" });
@@ -218,17 +290,22 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       for (const trade of result.data.trades.slice(0, 8)) {
         const amount = fromSmallestUnit(trade.amount);
         const date = new Date(trade.timestamp).toLocaleDateString();
-        const statusEmoji = trade.status === "EXECUTED" ? "✅" : "⏳";
+        const statusEmoji = trade.status === "CONFIRMED" ? "✅" : trade.status === "PENDING" ? "⏳" : "❌";
 
         msg += `${statusEmoji} ${amount.toFixed(4)} tokens\n`;
-        msg += `   ${date} · ${trade.status}\n\n`;
+        msg += `   ${date} · ${trade.status}\n`;
+        
+        if (trade.explorerUrl) {
+          msg += `   [View Tx](${trade.explorerUrl})\n`;
+        }
+        msg += `\n`;
       }
 
       if (result.data.trades.length > 8) {
         msg += `_...${result.data.trades.length - 8} more_`;
       }
 
-      return ctx.reply(msg, { parse_mode: "Markdown" });
+      return ctx.reply(msg, { parse_mode: "Markdown", disable_web_page_preview: true });
     } catch (error: any) {
       console.error("Trade history error:", error);
       return ctx.reply(`❌ ${error.message}`);
@@ -262,6 +339,7 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
       return ctx.reply(`❌ ${error.message}`);
     }
   });
+
   bot.command("tradehelp", async (ctx) => {
     ctx.reply(
       `🔰 **Trade Commands**\n\n` +

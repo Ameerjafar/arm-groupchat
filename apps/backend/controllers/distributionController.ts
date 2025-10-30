@@ -12,7 +12,7 @@ import { prisma } from "@repo/db";
 import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
 import crypto from "crypto";
-import bs58 from "bs58"; // Add this import
+import bs58 from "bs58";
 import idl from "../../../contract/groupchat_fund/target/idl/groupchat_fund.json";
 
 // ==================== HELPER FUNCTIONS ====================
@@ -82,22 +82,16 @@ function getKeypairFromEncrypted(
   expectedWalletAddress: string
 ): Keypair | null {
   try {
-    // Decrypt the private key (returns base58 string)
     const decryptedBase58String = decryptPrivateKey(encryptedPrivateKey);
-    
-    // Decode base58 to get secret key bytes
     const secretKey = bs58.decode(decryptedBase58String);
 
-    // Validate secret key length
     if (secretKey.length !== 64) {
       console.error(`Invalid secret key length: ${secretKey.length}, expected 64`);
       return null;
     }
 
-    // Create keypair from secret key
     const keypair = Keypair.fromSecretKey(secretKey);
 
-    // Verify the public key matches the stored wallet address
     if (keypair.publicKey.toString() !== expectedWalletAddress) {
       console.error("Decrypted keypair does not match stored wallet address");
       console.error("Expected:", expectedWalletAddress);
@@ -110,6 +104,63 @@ function getKeypairFromEncrypted(
     console.error("Error decrypting keypair:", error);
     return null;
   }
+}
+
+/**
+ * Fetch on-chain account with retry logic
+ */
+async function fetchAccountWithRetry(
+  program: anchor.Program,
+  accountType: string,
+  pda: PublicKey,
+  maxRetries: number = 3
+): Promise<any> {
+  let lastError;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(`Fetching ${accountType} account at ${pda.toString()}...`);
+      const account = await (program.account as any)[accountType].fetch(pda);
+      console.log(`✅ Successfully fetched ${accountType} account`);
+      return account;
+    } catch (err: any) {
+      lastError = err;
+      console.error(`Attempt ${i + 1}/${maxRetries} failed:`, err.message);
+      
+      if (i === maxRetries - 1) {
+        console.error(`Failed to fetch ${accountType} account after ${maxRetries} attempts`);
+        throw new Error(`Failed to fetch ${accountType} account: ${err.message}`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  
+  throw lastError;
+}
+
+/**
+ * Derive PDAs for fund and member
+ */
+function derivePDAs(program: anchor.Program, groupId: string, memberWallet: PublicKey) {
+  const [fundPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("fund"), Buffer.from(groupId)],
+    program.programId
+  );
+
+  const [memberPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("member"), fundPDA.toBuffer(), memberWallet.toBuffer()],
+    program.programId
+  );
+
+  console.log("📍 Derived PDAs:", {
+    fundPDA: fundPDA.toString(),
+    memberPDA: memberPDA.toString(),
+    groupId,
+    programId: program.programId.toString(),
+  });
+
+  return { fundPDA, memberPDA };
 }
 
 // ==================== CONTROLLER ====================
@@ -223,6 +274,8 @@ export const distributionController = {
         });
       }
 
+      const conn = getConnection();
+
       // Get user with wallet using telegramId
       const user = await prisma.user.findUnique({
         where: { telegramId },
@@ -276,17 +329,35 @@ export const distributionController = {
         });
       }
 
+      // Get fund record
+      const fund = await prisma.fund.findUnique({
+        where: { groupId },
+      });
+
+      if (!fund) {
+        return res.status(404).json({
+          success: false,
+          error: "Fund not found in database",
+        });
+      }
+
       // Distribute value
       console.log("📤 Executing distribute value transaction...");
-      const tx = await distributeValueToMember({
+      const txSignature = await distributeValueToMember({
         program,
         groupId,
         memberWallet,
       });
 
-      console.log("✅ Transaction successful:", tx);
+      console.log("✅ Transaction successful:", txSignature);
 
-      // Save to database
+      // CONFIRM TRANSACTION
+      console.log("⏳ Confirming transaction...");
+      await conn.confirmTransaction(txSignature, "confirmed");
+      console.log("✅ Transaction confirmed");
+
+      // SAVE TO DATABASE FIRST (before trying to fetch on-chain state)
+      console.log("💾 Saving distribution to database...");
       const distribution = await prisma.distribution.create({
         data: {
           userId: user.telegramId,
@@ -295,12 +366,58 @@ export const distributionController = {
           amount: distInfo.distributionAmount,
           profitOrLoss: distInfo.profitOrLoss,
           sharesBurned: distInfo.shares,
-          txSignature: tx,
+          txSignature: txSignature,
           distributedAt: new Date(),
         },
       });
 
-      console.log("💾 Saved to database:", distribution.id);
+      console.log("✅ Distribution saved:", distribution.id);
+
+      // TRY TO FETCH UPDATED ON-CHAIN STATE (but don't fail if it doesn't work)
+      let onChainState = null;
+      try {
+        console.log("📊 Attempting to fetch updated on-chain state...");
+        const { fundPDA, memberPDA } = derivePDAs(program, groupId, memberWallet);
+
+        const memberAccount = await fetchAccountWithRetry(program, "member", memberPDA).catch(err => {
+          console.warn("Could not fetch member account:", err.message);
+          return null;
+        });
+
+        const fundAccount = await fetchAccountWithRetry(program, "fund", fundPDA).catch(err => {
+          console.warn("Could not fetch fund account:", err.message);
+          return null;
+        });
+
+        if (fundAccount && memberAccount) {
+          console.log("📊 Updated on-chain state:", {
+            memberShares: memberAccount?.shares?.toString() || "N/A",
+            fundTotalShares: fundAccount.totalShares?.toString() || "N/A",
+            fundBalance: fundAccount.totalValue?.toString() || "N/A", // ✅ FIXED: Use totalValue not balance
+          });
+
+          onChainState = {
+            memberShares: memberAccount?.shares?.toString() || "0",
+            fundBalance: fundAccount.totalValue?.toString() || "0", // ✅ FIXED
+            fundTotalShares: fundAccount.totalShares?.toString() || "0",
+          };
+
+          // Update fund balance if we successfully fetched it
+          await prisma.fund.update({
+            where: { groupId },
+            data: {
+              balance: BigInt(fundAccount.totalValue.toString()), // ✅ FIXED: Convert totalValue to BigInt
+              updatedAt: new Date(),
+            },
+          });
+
+          console.log("💾 Fund balance updated in database");
+        } else {
+          console.warn("⚠️ Could not fetch all account data, skipping balance update");
+        }
+      } catch (error: any) {
+        console.error("⚠️ Error fetching on-chain state (non-fatal):", error.message);
+      }
 
       res.json({
         success: true,
@@ -309,7 +426,8 @@ export const distributionController = {
           distributionAmountSOL: Number(distInfo.distributionAmount) / 1e9,
           profitOrLossSOL: Number(distInfo.profitOrLoss) / 1e9,
           status: distInfo.status,
-          txSignature: tx,
+          txSignature: txSignature,
+          onChainState: onChainState || { note: "On-chain state not available yet" },
         },
       });
     } catch (error: any) {
@@ -317,6 +435,7 @@ export const distributionController = {
       res.status(500).json({
         success: false,
         error: error.message || "Failed to cash out",
+        details: error.toString(),
       });
     }
   },
@@ -329,12 +448,16 @@ export const distributionController = {
     try {
       const { groupId, telegramId } = req.body;
 
+      console.log("📥 Claim profit request:", { groupId, telegramId });
+
       if (!groupId || !telegramId) {
         return res.status(400).json({
           success: false,
           error: "Group ID and Telegram ID are required",
         });
       }
+
+      const conn = getConnection();
 
       const user = await prisma.user.findUnique({
         where: { telegramId },
@@ -346,6 +469,8 @@ export const distributionController = {
           error: "User wallet not found",
         });
       }
+
+      console.log("👤 User found:", user.username);
 
       const memberWallet = new PublicKey(user.walletAddress);
 
@@ -362,6 +487,8 @@ export const distributionController = {
         });
       }
 
+      console.log("🔑 Keypair created successfully");
+
       // Create program with member's wallet
       const program = createProgram(memberKeypair);
 
@@ -372,6 +499,11 @@ export const distributionController = {
         memberWallet,
       });
 
+      console.log("💰 Profit info:", {
+        netProfit: Number(profitInfo.netProfit) / 1e9,
+        grossProfit: Number(profitInfo.grossProfit) / 1e9,
+      });
+
       if (Number(profitInfo.netProfit) <= 0) {
         return res.status(400).json({
           success: false,
@@ -379,13 +511,35 @@ export const distributionController = {
         });
       }
 
+      // Get fund record
+      const fund = await prisma.fund.findUnique({
+        where: { groupId },
+      });
+
+      if (!fund) {
+        return res.status(404).json({
+          success: false,
+          error: "Fund not found in database",
+        });
+      }
+
       // Distribute profit
-      const tx = await distributeProfitToMember({
+      console.log("📤 Executing distribute profit transaction...");
+      const txSignature = await distributeProfitToMember({
         program,
         groupId,
         memberWallet,
       });
 
+      console.log("✅ Transaction successful:", txSignature);
+
+      // CONFIRM TRANSACTION
+      console.log("⏳ Confirming transaction...");
+      await conn.confirmTransaction(txSignature, "confirmed");
+      console.log("✅ Transaction confirmed");
+
+      // SAVE TO DATABASE FIRST
+      console.log("💾 Saving distribution to database...");
       const distribution = await prisma.distribution.create({
         data: {
           userId: user.telegramId,
@@ -394,10 +548,49 @@ export const distributionController = {
           amount: profitInfo.netProfit,
           profitOrLoss: profitInfo.grossProfit,
           sharesBurned: "0",
-          txSignature: tx,
+          txSignature: txSignature,
           distributedAt: new Date(),
         },
       });
+
+      console.log("✅ Distribution saved:", distribution.id);
+
+      // TRY TO FETCH UPDATED ON-CHAIN STATE
+      let onChainState = null;
+      try {
+        console.log("📊 Attempting to fetch updated on-chain state...");
+        const { fundPDA } = derivePDAs(program, groupId, memberWallet);
+
+        const fundAccount = await fetchAccountWithRetry(program, "fund", fundPDA).catch(err => {
+          console.warn("Could not fetch fund account:", err.message);
+          return null;
+        });
+
+        if (fundAccount) {
+          console.log("📊 Updated on-chain state:", {
+            fundBalance: fundAccount.totalValue?.toString() || "N/A", // ✅ FIXED
+          });
+
+          onChainState = {
+            fundBalance: fundAccount.totalValue?.toString() || "0", // ✅ FIXED
+          };
+
+          // Update fund balance
+          await prisma.fund.update({
+            where: { groupId },
+            data: {
+              balance: BigInt(fundAccount.totalValue.toString()), // ✅ FIXED
+              updatedAt: new Date(),
+            },
+          });
+
+          console.log("💾 Fund balance updated in database");
+        } else {
+          console.warn("⚠️ Could not fetch fund account, skipping balance update");
+        }
+      } catch (error: any) {
+        console.error("⚠️ Error fetching on-chain state (non-fatal):", error.message);
+      }
 
       res.json({
         success: true,
@@ -405,7 +598,8 @@ export const distributionController = {
           distribution,
           netProfitSOL: Number(profitInfo.netProfit) / 1e9,
           grossProfitSOL: Number(profitInfo.grossProfit) / 1e9,
-          txSignature: tx,
+          txSignature: txSignature,
+          onChainState: onChainState || { note: "On-chain state not available yet" },
         },
       });
     } catch (error: any) {
@@ -413,6 +607,7 @@ export const distributionController = {
       res.status(500).json({
         success: false,
         error: error.message || "Failed to claim profit",
+        details: error.toString(),
       });
     }
   },
@@ -425,6 +620,8 @@ export const distributionController = {
     try {
       const { groupId, authorityTelegramId } = req.body;
 
+      console.log("📥 Cash out all request:", { groupId, authorityTelegramId });
+
       if (!groupId || !authorityTelegramId) {
         return res.status(400).json({
           success: false,
@@ -432,7 +629,7 @@ export const distributionController = {
         });
       }
 
-      const connection = getConnection();
+      const conn = getConnection();
 
       // Verify authority
       const fund = await prisma.fund.findUnique({
@@ -453,6 +650,8 @@ export const distributionController = {
         });
       }
 
+      console.log("✅ Authority verified");
+
       // Get all members who have contributed to this fund
       const contributions = await prisma.contribution.findMany({
         where: { fundId: fund.id },
@@ -469,6 +668,8 @@ export const distributionController = {
           },
         },
       });
+
+      console.log(`👥 Found ${members.length} members to cash out`);
 
       // Create keypair map
       const memberKeypairs = new Map();
@@ -491,38 +692,76 @@ export const distributionController = {
       const program = getProgram();
 
       // Distribute to all
+      console.log("📤 Executing batch distributions...");
       const results = await distributeValueToAllMembers({
         program,
-        connection,
+        connection: conn,
         groupId,
         memberKeypairs,
       });
 
+      console.log(`✅ Batch distributions completed: ${results.length} results`);
+
+      // Confirm all successful transactions
+      const successfulResults = results.filter(r => r.success && r.tx);
+      
+      console.log("⏳ Confirming all transactions...");
+      await Promise.all(
+        successfulResults.map(r => conn.confirmTransaction(r.tx!, "confirmed"))
+      );
+      console.log("✅ All transactions confirmed");
+
       // Save successful distributions to database
-      for (const result of results) {
-        if (result.success && result.tx) {
-          const user = await prisma.user.findFirst({
-            where: {
-              walletAddress: result.wallet,
+      console.log("💾 Syncing database for all distributions...");
+      for (const result of successfulResults) {
+        const user = await prisma.user.findFirst({
+          where: {
+            walletAddress: result.wallet,
+          },
+        });
+
+        if (user) {
+          await prisma.distribution.create({
+            data: {
+              userId: user.telegramId,
+              fundId: groupId,
+              type: "FULL_CASHOUT",
+              amount: result.distributionAmount || "0",
+              profitOrLoss: result.profitOrLoss || "0",
+              sharesBurned: result.shares,
+              txSignature: result.tx!,
+              distributedAt: new Date(),
             },
           });
-
-          if (user) {
-            await prisma.distribution.create({
-              data: {
-                userId: user.telegramId,
-                fundId: groupId,
-                type: "FULL_CASHOUT",
-                amount: result.distributionAmount || "0",
-                profitOrLoss: result.profitOrLoss || "0",
-                sharesBurned: result.shares,
-                txSignature: result.tx,
-                distributedAt: new Date(),
-              },
-            });
-          }
         }
       }
+
+      // TRY to fetch final fund state
+      let onChainState = null;
+      try {
+        const { fundPDA } = derivePDAs(program, groupId, PublicKey.default);
+        const fundAccount = await fetchAccountWithRetry(program, "fund", fundPDA).catch(() => null);
+
+        if (fundAccount) {
+          onChainState = {
+            fundBalance: fundAccount.totalValue?.toString() || "0", // ✅ FIXED
+            fundTotalShares: fundAccount.totalShares?.toString() || "0",
+          };
+
+          // Update fund with final on-chain balance
+          await prisma.fund.update({
+            where: { groupId },
+            data: {
+              balance: BigInt(fundAccount.totalValue.toString()), // ✅ FIXED
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (error: any) {
+        console.error("⚠️ Error fetching final fund state (non-fatal):", error.message);
+      }
+
+      console.log("💾 Database synced successfully for all members");
 
       res.json({
         success: true,
@@ -533,6 +772,7 @@ export const distributionController = {
             successful: results.filter((r) => r.success).length,
             failed: results.filter((r) => !r.success).length,
           },
+          onChainState: onChainState || { note: "On-chain state not available yet" },
         },
       });
     } catch (error: any) {
@@ -540,6 +780,7 @@ export const distributionController = {
       res.status(500).json({
         success: false,
         error: error.message || "Failed to cash out all members",
+        details: error.toString(),
       });
     }
   },

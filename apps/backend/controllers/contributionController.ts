@@ -9,6 +9,7 @@ import {
   getMemberShares,
   withdrawFromFund,
 } from '../services/solanaServices/contributService';
+import { isPropertyAccessOrQualifiedName } from 'typescript';
 // import { syncFundBalance } from '../services/syncService';
 
 // ==================== CONTRIBUTION OPERATIONS ====================
@@ -84,10 +85,18 @@ export const createContribution = async (
     const blockchainResult = await contributeToFund(groupId, telegramId, amountSol);
 
     // ✅ SYNC DATABASE WITH BLOCKCHAIN
-    let newBalance = 0;
+    let newBalance = fund.balance + BigInt(amountSol * LAMPORTS_PER_SOL);
     try {
-      // newBalance = await syncFundBalance(groupId);
-      console.log(`✅ Database synced after contribution: ${newBalance / LAMPORTS_PER_SOL} SOL`);
+      const updateBalance = await prisma.fund.update({
+        where: {
+          groupId
+        },
+        data: {
+          balance: newBalance
+        }
+      })
+      console.log(newBalance);
+      console.log(`✅ Database synced after contribution: ${newBalance / BigInt(LAMPORTS_PER_SOL)} SOL`);
     } catch (syncError) {
       console.error('⚠️ Database sync failed (contribution still successful):', syncError);
     }

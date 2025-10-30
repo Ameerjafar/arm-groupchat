@@ -21,7 +21,7 @@ const connection = new Connection(
 );
 
 const programId = new PublicKey(
-  process.env.PROGRAM_ID || "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
+  process.env.PROGRAM_ID || "JDomJJbEK48FriJ5RVuTmgDGbNN8DLKAv33NdTydcWWd"
 );
 
 // ==================== TYPES ====================

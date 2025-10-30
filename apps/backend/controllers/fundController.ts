@@ -9,7 +9,7 @@ import axios from 'axios';
 async function isUserInGroup(groupId: string, telegramId: string): Promise<boolean> {
   try {
     const botToken = process.env.BOT_TOKEN;
-    
+    console.log("here is the error", process.env.BOT_TOKEN);
     if (!botToken) {
       throw new Error('BOT_TOKEN is not configured');
     }
@@ -72,6 +72,7 @@ export const createFund = async (
     let isInGroup: boolean;
     try {
       isInGroup = await isUserInGroup(groupId, telegramId);
+      console.log("hello", isInGroup);
     } catch (membershipError: any) {
       console.error('Membership check error:', membershipError);
       return res.status(403).json({

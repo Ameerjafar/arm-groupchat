@@ -4,10 +4,10 @@
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-groupchat_fund = "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
-
 [programs.devnet]
+groupchat_fund = "JDomJJbEK48FriJ5RVuTmgDGbNN8DLKAv33NdTydcWWd"
+
+[programs.localnet]
 groupchat_fund = "9js3iSazWV97SrExQ9YEeTm2JozqccMetm9vSfouoUqy"
 
 [registry]
