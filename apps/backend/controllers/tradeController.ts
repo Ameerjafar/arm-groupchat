@@ -248,6 +248,172 @@ export const executeTradeController = async (
   }
 };
 
+
+export const executeTradeControllerBeta = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<Response | void> => {
+  try {
+    const {
+      groupId,
+      telegramId,
+      fromToken,
+      toToken,
+      amount,
+      minimumOut,
+    } = req.body;
+
+    console.log("📥 Executing trade...");
+    console.log("Inputs:", { groupId, telegramId, fromToken, toToken, amount, minimumOut });
+
+    // Validate inputs
+    if (!groupId || !telegramId || !fromToken || !toToken || !amount || !minimumOut) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: groupId, telegramId, fromToken, toToken, amount, minimumOut",
+      });
+    }
+
+    // Get fund from database
+    const fund = await prisma.fund.findUnique({
+      where: { groupId },
+    });
+
+    if (!fund) {
+      return res.status(404).json({
+        success: false,
+        message: "Fund not found for this group",
+      });
+    }
+
+    if (fund.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: "Fund is not active",
+      });
+    }
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { telegramId },
+    });
+
+    if (!user || !user.walletAddress) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found or wallet not connected",
+      });
+    }
+
+    // Verify user is fund authority (admin)
+    if (user.walletAddress !== fund.initiator) {
+      return res.status(403).json({
+        success: false,
+        message: "Only fund authority (admin) can execute trades",
+      });
+    }
+
+    // Check trading permissions
+    const { canTrade, reason } = await canExecuteTrade(groupId, telegramId);
+
+    if (!canTrade) {
+      return res.status(403).json({
+        success: false,
+        message: reason || "You are not authorized to execute trades",
+      });
+    }
+
+    // Execute trade on blockchain
+    console.log("🚀 Calling executeTrade service...");
+    const blockchainResult = await executeTrade(
+      groupId,
+      telegramId,
+      fromToken,
+      toToken,
+      amount,
+      minimumOut
+    );
+
+    if (!blockchainResult?.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to execute trade on blockchain",
+        error: blockchainResult?.message,
+      });
+    }
+
+    console.log("✅ Trade executed on blockchain");
+
+    // Log transaction in database
+    const txRecord = await prisma.transaction.create({
+      data: {
+        fundId: fund.id,
+        type: "TRADE",
+        amount: BigInt(amount),
+        signature: blockchainResult.transactionSignature!,
+        fromAddress: blockchainResult.fromToken,
+        toAddress: blockchainResult.toToken,
+        initiator: telegramId,
+        status: "CONFIRMED",
+      },
+    });
+
+    console.log("💾 Transaction logged in database:", txRecord.id);
+
+    // SYNC FUND STATE AFTER TRADE
+    await syncFundAfterTrade(groupId);
+
+    // Fetch updated fund data for response
+    const updatedFund = await prisma.fund.findUnique({
+      where: { groupId },
+    });
+
+    const newBalanceSOL = updatedFund ? Number(updatedFund.balance) / LAMPORTS_PER_SOL : 0;
+
+    console.log("💰 Updated fund balance:", newBalanceSOL, "SOL");
+
+    return res.status(201).json({
+      success: true,
+      message: "Trade executed successfully",
+      data: {
+        fromToken: blockchainResult.fromToken,
+        toToken: blockchainResult.toToken,
+        amount: blockchainResult.amount,
+        minimumOut: blockchainResult.minimumOut,
+        transactionSignature: blockchainResult.transactionSignature,
+        explorerUrl: `https://explorer.solana.com/tx/${blockchainResult.transactionSignature}?cluster=devnet`,
+        updatedFundBalance: newBalanceSOL,
+      },
+    });
+  } catch (error: any) {
+    console.error("❌ Error executing trade:", error);
+
+    if (error.message?.includes("InsufficientFunds") || error.message?.includes("Insufficient funds")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (error.message?.includes("UnauthorizedTrader") || error.message?.includes("Only fund authority")) {
+      return res.status(403).json({
+        success: false,
+        message: "Only fund authority can execute trades",
+      });
+    }
+
+    if (error.message?.includes("FundNotActive")) {
+      return res.status(400).json({
+        success: false,
+        message: "Fund is not active",
+      });
+    }
+
+    return next(error);
+  }
+};
+
 // ==================== QUERY OPERATIONS ====================
 
 /**

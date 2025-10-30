@@ -7,12 +7,13 @@ import {
   getFundTradingInfoController,
   getTradeHistoryController,
   getFundStatistics,
+  executeTradeControllerBeta
 } from '../controllers/tradeController';
 
 const router = Router();
 
 // ==================== TRADE EXECUTION ====================
-router.post('/execute', executeTradeController);
+router.post('/execute', executeTradeControllerBeta);
 
 // ==================== QUERY OPERATIONS ====================
 router.get('/permissions', checkTradePermissions);

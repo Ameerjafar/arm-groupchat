@@ -14,6 +14,7 @@ import IDL from "../../../../contract/groupchat_fund/target/idl/groupchat_fund.j
 import { prisma } from "@repo/db";
 import bs58 from "bs58";
 import { decrypt } from "../utlis";
+import { swapSolToToken } from '../raydiumSwapService.ts';
 
 // ==================== SOLANA SETUP ====================
 
@@ -425,4 +426,76 @@ export async function getTradeHistory(groupId: string, limit: number = 10) {
       message: error.message,
     };
   }
+}
+
+
+/**
+ * Execute trade using Raydium SDK V2
+ */
+export const executeTrade = async (
+  groupId: string,
+  telegramId: string,
+  fromToken: string,
+  toToken: string,
+  amount: string,
+  minimumOut: string
+) => {
+  try {
+    // Get fund's secret key from your secure storage
+    const fundSecretKey = await getFundSecretKey(groupId);
+    const fundKeypair = Keypair.fromSecretKey(bs58.decode(fundSecretKey));
+
+    // Parse amount
+    const amountInSol = parseFloat(amount);
+
+    console.log(`🔄 Executing trade: ${amountInSol} SOL → ${toToken}`);
+
+    // Execute swap using Raydium
+    const swapResult = await swapSolToToken(
+      fundKeypair,
+      toToken, // Target token mint address (e.g., USDC)
+      amountInSol,
+      1 // 1% slippage
+    );
+
+    if (!swapResult.success) {
+      throw new Error(swapResult.message || 'Swap failed');
+    }
+
+    return {
+      success: true,
+      transactionSignature: swapResult.transactionSignature,
+      fromToken: swapResult.fromToken,
+      toToken: swapResult.toToken,
+      amount: swapResult.amount,
+      minimumOut: swapResult.outputAmount,
+      message: 'Trade executed successfully',
+    };
+  } catch (error: any) {
+    console.error('❌ Execute trade error:', error);
+    return {
+      success: false,
+      message: error.message || 'Trade execution failed',
+    };
+  }
+};
+
+/**
+ * Retrieve fund's secret key securely
+ * Implement this based on your security model
+ */
+async function getFundSecretKey(groupId: string): Promise<string> {
+  // TODO: Implement secure key retrieval from database or key management service
+  // This should fetch the encrypted private key and decrypt it
+  // For now, this is a placeholder
+  const fund = await prisma.fund.findUnique({
+    where: { groupId },
+  });
+
+  if (!fund || !fund.privateKey) {
+    throw new Error('Fund private key not found');
+  }
+
+  // Return the private key (ensure it's stored encrypted in production!)
+  return fund.privateKey;
 }
