@@ -1,4 +1,3 @@
-// services/solanaServices/tradeServices.ts
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program, BN } from "@coral-xyz/anchor";
@@ -15,7 +14,6 @@ import { prisma } from "@repo/db";
 import bs58 from "bs58";
 import { decrypt } from "../utlis";
 
-// ==================== SOLANA SETUP ====================
 
 const connection = new Connection(
   process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",

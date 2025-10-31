@@ -11,7 +11,7 @@ import {
 const router = express.Router();
 
 router.post('/', createContribution);
-router.get('/contributions/fund', getContributionsByFund);
+router.get('/fund', getContributionsByFund);
 router.get('/contributions/user', getContributionsByContributor);
 router.get('/myshares', getMyShares);
 router.get('/contributions/:groupId', getUserFundContribution);

@@ -397,7 +397,7 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
   bot.command("contributehelp", async (ctx) => {
     ctx.reply(
       "💰 **How to Contribute**\n\n" +
-        "1. Create a wallet: /start (in private chat)\n" +
+        "1. Create a wallet using /start command\n" +
         "2. Contribute: `/contribute 0.5` (in group)\n" +
         "3. View position: /myshares\n\n" +
         "**What are shares?**\n" +
@@ -405,8 +405,6 @@ export function registerContributorCommands(bot: Telegraf<MyContext>) {
         "As the fund grows from successful trades, your shares become more valuable.\n\n" +
         "**Commands:**\n" +
         "• /myshares - Your position\n" +
-        "• /mycontributions - History\n" +
-        "• /myfunds - All portfolios\n" +
         "• /contributors - Fund members",
       { parse_mode: "Markdown" }
     );

@@ -1,5 +1,3 @@
-// controllers/contributionController.ts
-
 import { Request, Response, NextFunction } from 'express';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { prisma } from '@repo/db';
@@ -9,14 +7,8 @@ import {
   getMemberShares,
   withdrawFromFund,
 } from '../services/solanaServices/contributService';
-import { isPropertyAccessOrQualifiedName } from 'typescript';
-// import { syncFundBalance } from '../services/syncService';
 
-// ==================== CONTRIBUTION OPERATIONS ====================
 
-/**
- * Create a contribution (handles both blockchain and database)
- */
 export const createContribution = async (
   req: Request,
   res: Response,
@@ -411,6 +403,7 @@ export const getContributionsByFund = async (
   next: NextFunction
 ): Promise<Response | void> => {
   try {
+    console.log("inside the contribution controller");
     const { groupId } = req.query;
     const { page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);

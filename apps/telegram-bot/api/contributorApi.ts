@@ -48,7 +48,8 @@ export class ContributionApiService {
     limit = 20,
   }: GetContributionType) {
     try {
-      const response = await this.api.get("/contributions/fund", {
+      console.log("contributors is working properly now");
+      const response = await this.api.get("contribution/fund", {
         params: { groupId, page, limit },
       });
       return response.data;

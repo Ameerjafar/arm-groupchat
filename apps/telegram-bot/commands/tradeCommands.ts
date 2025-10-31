@@ -162,7 +162,7 @@ export function registerTradeCommands(bot: Telegraf<MyContext>) {
     const clickUserId = ctx.from.id.toString();
 
     // Get trade details from memory
-    const trade = pendingTrades.get(tradeId);
+    const trade = pendingTrades.get(tradeId); 
 
     if (!trade) {
       return ctx.answerCbQuery("⚠️ Trade expired or not found.", {
