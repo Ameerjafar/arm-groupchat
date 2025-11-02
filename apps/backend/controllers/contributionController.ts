@@ -171,11 +171,7 @@ export const createContribution = async (
   }
 };
 
-// ==================== WITHDRAWAL OPERATIONS ====================
 
-/**
- * Withdraw from fund (burn shares)
- */
 export const withdrawController = async (
   req: Request,
   res: Response,
