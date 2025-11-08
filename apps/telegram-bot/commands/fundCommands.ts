@@ -45,7 +45,6 @@ export function registerFundCommands(bot: Telegraf<MyContext>) {
     }
   }
 
-  // ========== INIT FUND ==========
   bot.command("initfund", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const userId = ctx.from.id.toString();

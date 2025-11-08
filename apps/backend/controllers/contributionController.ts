@@ -60,8 +60,6 @@ export const createContribution = async (
         message: `Minimum contribution is ${minContributionSol} SOL`,
       });
     }
-
-    // Get user info
     const user = await prisma.user.findUnique({
       where: { telegramId },
     });
